@@ -1,0 +1,20 @@
+[
+  {
+    "email": "john.doe@example.com",
+    "job_title": "Software Engineer",
+    "programs": ["Apples", "Oranges"],
+    "start_date": "2023-01-15"
+  },
+  {
+    "email": "jane.smith@example.com",
+    "job_title": "Sales Manager",
+    "programs": ["Lemons", "Grapes"],
+    "start_date": "2022-08-01"
+  },
+  {
+    "email": "bob.wilson@example.com",
+    "job_title": "DevOps Engineer",
+    "programs": ["Apples", "Lemons"],
+    "start_date": "2024-03-20"
+  }
+]

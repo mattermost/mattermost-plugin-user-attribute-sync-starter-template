@@ -1,0 +1,35 @@
+{
+    "id": "com.mattermost.user-attribute-sync-starter-template",
+    "name": "User Attribute Sync Starter Template",
+    "description": "A reference implementation demonstrating how to synchronize user profile attributes from external systems into Mattermost's Custom Profile Attributes.",
+    "homepage_url": "https://github.com/mattermost/mattermost-plugin-starter-template",
+    "support_url": "https://github.com/mattermost/mattermost-plugin-starter-template/issues",
+    "icon_path": "assets/starter-template-icon.svg",
+    "min_server_version": "11.1.0",
+    "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64",
+            "linux-arm64": "server/dist/plugin-linux-arm64",
+            "darwin-amd64": "server/dist/plugin-darwin-amd64",
+            "darwin-arm64": "server/dist/plugin-darwin-arm64",
+            "windows-amd64": "server/dist/plugin-windows-amd64.exe"
+        }
+    },
+    "webapp": {
+        "bundle_path": "webapp/dist/main.js"
+    },
+    "settings_schema": {
+        "header": "",
+        "footer": "",
+        "settings": [
+            {
+                "key": "SyncIntervalMinutes",
+                "display_name": "Sync Interval (Minutes)",
+                "type": "number",
+                "help_text": "How often (in minutes) the plugin should sync user attributes from the external source. Minimum value is 1 minute.",
+                "default": 60,
+                "placeholder": "60"
+            }
+        ]
+    }
+}
