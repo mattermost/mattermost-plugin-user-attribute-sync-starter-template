@@ -174,11 +174,43 @@ func createField(
 	return createdField, nil
 }
 
+// isFieldOwnedByPlugin checks if an existing field is owned and managed by this plugin
+// by verifying the source_plugin_id attribute matches our plugin ID.
+func isFieldOwnedByPlugin(
+	client *pluginapi.Client,
+	existingField *model.PropertyField,
+	pluginID string,
+	def fieldDefinition,
+) bool {
+	sourcePluginID, hasSource := existingField.Attrs[model.PropertyAttrsSourcePluginID]
+	if !hasSource {
+		// No source plugin ID - field was created by admin or other means
+		client.Log.Error("Field already exists but has no source_plugin_id (likely created by admin)",
+			"field_name", def.Name,
+			"field_id", existingField.ID)
+		return false
+	}
+
+	sourceID, ok := sourcePluginID.(string)
+	if !ok || sourceID != pluginID {
+		// Field is owned by a different plugin
+		client.Log.Error("Field already exists but is owned by another plugin",
+			"field_name", def.Name,
+			"field_id", existingField.ID,
+			"owner_plugin_id", sourceID)
+		return false
+	}
+
+	// Source plugin ID matches ours
+	return true
+}
+
 // syncSingleField ensures a single CPA field exists and matches the definition.
 // Updates the cache with field and option IDs. Returns the field ID or error.
 func syncSingleField(
 	client *pluginapi.Client,
 	groupID string,
+	pluginID string,
 	def fieldDefinition,
 	cache *FieldIDCache,
 ) (string, error) {
@@ -187,7 +219,14 @@ func syncSingleField(
 
 	var field *model.PropertyField
 	if err == nil && existingField != nil {
-		// Field exists - update it
+		// Field exists - verify we own it before attempting to update
+		if !isFieldOwnedByPlugin(client, existingField, pluginID, def) {
+			return "", errors.Errorf(
+				"field %s already exists but is not managed by this plugin",
+				def.Name)
+		}
+
+		// Field exists and we own it - update it
 		field, err = updateField(client, groupID, existingField, def)
 		if err != nil {
 			return "", err
@@ -267,7 +306,7 @@ func extractOptionIDs(
 // Returns a FieldIDCache containing mappings from external names to Mattermost-generated IDs.
 //
 //nolint:revive
-func SyncFields(client *pluginapi.Client, groupID string) (*FieldIDCache, error) {
+func SyncFields(client *pluginapi.Client, groupID string, pluginID string) (*FieldIDCache, error) {
 	client.Log.Info("Syncing field definitions", "field_count", len(fieldDefinitions))
 
 	cache := &FieldIDCache{
@@ -278,7 +317,7 @@ func SyncFields(client *pluginapi.Client, groupID string) (*FieldIDCache, error)
 	var failedFields []string
 
 	for _, def := range fieldDefinitions {
-		_, err := syncSingleField(client, groupID, def, cache)
+		_, err := syncSingleField(client, groupID, pluginID, def, cache)
 		if err != nil {
 			client.Log.Error("Failed to sync field",
 				"name", def.Name,

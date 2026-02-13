@@ -14,6 +14,7 @@ import (
 
 func TestSyncFields(t *testing.T) {
 	groupID := "test-group-id"
+	pluginID := "test-plugin-id"
 
 	t.Run("creates all fields and returns ID cache", func(t *testing.T) {
 		api := &plugintest.API{}
@@ -53,7 +54,7 @@ func TestSyncFields(t *testing.T) {
 		api.On("LogInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 		api.On("LogDebug", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 
-		cache, err := SyncFields(client, groupID)
+		cache, err := SyncFields(client, groupID, pluginID)
 
 		require.NoError(t, err)
 		require.NotNil(t, cache)
@@ -76,7 +77,9 @@ func TestSyncFields(t *testing.T) {
 			GroupID: groupID,
 			Name:    "Job Title",
 			Type:    model.PropertyFieldTypeText,
-			Attrs:   make(model.StringInterface),
+			Attrs: model.StringInterface{
+				model.PropertyAttrsSourcePluginID: pluginID,
+			},
 		}
 		api.On("GetPropertyFieldByName", groupID, "", "Job Title").Return(existingJobTitle, nil).Once()
 		api.On("UpdatePropertyField", groupID, mock.MatchedBy(func(f *model.PropertyField) bool {
@@ -89,6 +92,7 @@ func TestSyncFields(t *testing.T) {
 			Name:    "Programs",
 			Type:    model.PropertyFieldTypeMultiselect,
 			Attrs: model.StringInterface{
+				model.PropertyAttrsSourcePluginID: pluginID,
 				model.PropertyFieldAttributeOptions: []interface{}{
 					map[string]interface{}{"id": "opt_id_1", "name": "Apples"},
 					map[string]interface{}{"id": "opt_id_2", "name": "Oranges"},
@@ -106,7 +110,9 @@ func TestSyncFields(t *testing.T) {
 			GroupID: groupID,
 			Name:    "Start Date",
 			Type:    model.PropertyFieldTypeDate,
-			Attrs:   make(model.StringInterface),
+			Attrs: model.StringInterface{
+				model.PropertyAttrsSourcePluginID: pluginID,
+			},
 		}
 		api.On("GetPropertyFieldByName", groupID, "", "Start Date").Return(existingStartDate, nil).Once()
 		api.On("UpdatePropertyField", groupID, mock.MatchedBy(func(f *model.PropertyField) bool {
@@ -117,7 +123,7 @@ func TestSyncFields(t *testing.T) {
 		api.On("LogInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 		api.On("LogDebug", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 
-		cache, err := SyncFields(client, groupID)
+		cache, err := SyncFields(client, groupID, pluginID)
 
 		require.NoError(t, err)
 		require.NotNil(t, cache)
@@ -138,9 +144,9 @@ func TestSyncFields(t *testing.T) {
 		optionsVerified := false
 		api.On("CreatePropertyField", mock.MatchedBy(func(f *model.PropertyField) bool {
 			if f.Name == "Programs" {
-				// Verify Programs field has correct options
+				// Verify Programs field has correct options (Apples, Oranges, Lemons, Grapes)
 				options, ok := f.Attrs[model.PropertyFieldAttributeOptions].([]interface{})
-				if ok && len(options) == 3 {
+				if ok && len(options) == 4 {
 					optionsVerified = true
 				}
 			}
@@ -153,6 +159,7 @@ func TestSyncFields(t *testing.T) {
 					map[string]interface{}{"id": "opt1", "name": "Apples"},
 					map[string]interface{}{"id": "opt2", "name": "Oranges"},
 					map[string]interface{}{"id": "opt3", "name": "Lemons"},
+					map[string]interface{}{"id": "opt4", "name": "Grapes"},
 				}
 			}
 			return f, nil
@@ -162,7 +169,7 @@ func TestSyncFields(t *testing.T) {
 		api.On("LogInfo", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 		api.On("LogDebug", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 
-		cache, err := SyncFields(client, groupID)
+		cache, err := SyncFields(client, groupID, pluginID)
 
 		require.NoError(t, err)
 		assert.True(t, optionsVerified, "Options should be verified during field creation")
@@ -200,7 +207,7 @@ func TestSyncFields(t *testing.T) {
 		api.On("LogWarn", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 		api.On("LogDebug", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe()
 
-		cache, err := SyncFields(client, groupID)
+		cache, err := SyncFields(client, groupID, pluginID)
 
 		// Should not return error (graceful degradation)
 		require.NoError(t, err)

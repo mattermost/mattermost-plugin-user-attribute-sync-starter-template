@@ -1,0 +1,20 @@
+[
+  {
+    "email": "admin@localhost",
+    "job_title": "Localhost Wizard",
+    "programs": ["Apples"],
+    "start_date": "2023-01-15"
+  },
+  {
+    "email": "user1@localhost",
+    "job_title": "Localhost User 1",
+    "programs": ["Lemons", "Oranges"],
+    "start_date": "2022-08-01"
+  },
+  {
+    "email": "user2@localhost",
+    "job_title": "Localhost User 2",
+    "programs": ["Apples", "Lemons"],
+    "start_date": "2020-10-05"
+  }
+]
