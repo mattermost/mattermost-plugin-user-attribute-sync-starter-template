@@ -33,20 +33,39 @@ type fieldDefinition struct {
 	ExternalName string                  // Name used in external data source
 	Type         model.PropertyFieldType // Field type (text, date, multiselect, etc.)
 	OptionNames  []string                // Option names for multiselect fields
-	AccessMode   string                  // Read permissions for field
+	// AccessMode controls who can read this field's values. Three modes:
+	//   - Public (empty string): Everyone can read all field options and values
+	//   - SourceOnly: Only this plugin can read values; others see empty options and no values
+	//   - SharedOnly: Users only see field options and values they share with the target user
+	//                 (Only valid for select/multiselect fields. Example: If Alice selected
+	//                  [Apples, Bananas] and Bob selected [Bananas, Oranges], Alice querying
+	//                  Bob's values would only see [Bananas])
+	AccessMode string
 }
 
 // fieldDefinitions contains all Custom Profile Attribute fields this plugin creates.
 // Custom Profile Attributes (CPAs) are user metadata fields that appear in user profiles.
 // This plugin ensures these fields exist on startup and syncs external data into them.
+//
+// Access Control Examples:
+// The fields below demonstrate the three available access control modes. These are examples
+// showing what's possible - customize them based on your privacy and security requirements.
+//
+// All fields are marked as "protected" (see createField function), which means:
+//   - Only this plugin can modify the field structure (add/remove options, change types)
+//   - Only this plugin can write values (users and admins cannot manually edit)
+//   - Access modes control read permissions (who can see the data)
 var fieldDefinitions = []fieldDefinition{
 	{
+		// Public Access Example: Job titles are visible to everyone in the organization
 		Name:         "Job Title",
 		ExternalName: "job_title",
 		Type:         model.PropertyFieldTypeText,
 		AccessMode:   model.PropertyAccessModePublic,
 	},
 	{
+		// Shared-Only Access Example: Users can only see programs they have in common
+		// If viewing another user's profile, you'll only see programs you're both in
 		Name:         "Programs",
 		ExternalName: "programs",
 		Type:         model.PropertyFieldTypeMultiselect,
@@ -54,6 +73,8 @@ var fieldDefinitions = []fieldDefinition{
 		AccessMode:   model.PropertyAccessModeSharedOnly,
 	},
 	{
+		// Source-Only Access Example: Start dates are private - only this plugin can read them
+		// Useful for data that should be synchronized but not visible to users or other systems
 		Name:         "Start Date",
 		ExternalName: "start_date",
 		Type:         model.PropertyFieldTypeDate,
@@ -112,11 +133,22 @@ func createField(
 		Name:    def.Name,
 		Type:    def.Type,
 		Attrs: model.StringInterface{
-			// Always visible in UI so users can see the values
+			// Visibility controls whether values appear in the UI (user profiles/cards).
+			// This does NOT affect data access via API - use AccessMode for that.
+			// "Always" makes values visible in the UI. "Hidden" hides them from UI but
+			// data can still be retrieved via API (subject to AccessMode permissions).
 			model.CustomProfileAttributesPropertyAttrsVisibility: model.CustomProfileAttributesVisibilityAlways,
-			// Protected to prevent admins from modifying field structure
+
+			// Protected means only this plugin can:
+			//   - Modify field structure (add/remove options, change field type)
+			//   - Write/update values
+			// This prevents users and admins from manually editing data that should be
+			// synchronized from an external source. Required for non-public access modes.
 			model.PropertyAttrsProtected: true,
-			// Set configured read access mode
+
+			// AccessMode controls read permissions (who can see values via API and UI).
+			// Works in conjunction with "protected" to provide complete access control.
+			// See fieldDefinition.AccessMode for details on the three modes.
 			model.PropertyAttrsAccessMode: def.AccessMode,
 		},
 	}

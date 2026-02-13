@@ -8,7 +8,7 @@ Mattermost's Custom Profile Attributes system (also called Properties) allows yo
 
 This plugin demonstrates how to create fields with hardcoded definitions and synchronize values from external data sources. Fields are defined explicitly in code with their types (text, date, multiselect), and the plugin uses Mattermost's cluster job system to run periodic synchronization tasks. The implementation includes incremental synchronization that processes only changed data after the initial sync.
 
-The template creates three example fields: Job Title (text), Programs (multiselect with options Apples, Oranges, and Lemons), and Start Date (date in YYYY-MM-DD format). All fields are marked as hidden (not shown in profile/user card) and admin-managed (users cannot edit).
+The template creates three example fields that demonstrate different access control modes: Job Title (text, public access), Programs (multiselect with options, shared-only access), and Start Date (date, source-only access). All fields are marked as visible in the UI and protected (only this plugin can modify structure and write values).
 
 ## Architecture Overview
 
@@ -70,7 +70,39 @@ Immediately after activation, the plugin runs its first synchronization. It read
 
 After the initial sync, the plugin checks for changes every 60 minutes by default. The file provider tracks the modification time of `user_attributes.json` and only processes the file if it has been modified since the last sync. When changes are detected, the plugin syncs all users in the file again. You can adjust the sync interval in the plugin configuration settings.
 
-The synced attribute values are stored as Custom Profile Attributes and can be viewed through the Mattermost API or by querying the database directly. Since the fields are marked as hidden, they do not appear in user profiles or user cards in the UI.
+The synced attribute values are stored as Custom Profile Attributes and can be viewed in System Console → User Attributes or through the Mattermost API.
+
+## Access Control
+
+This template demonstrates Mattermost's field-level access control system through three example fields, each using a different access mode.
+
+### Access Modes
+
+**Public Access** (Job Title example): Everyone can read all field values via API and UI. Best for non-sensitive organizational data like job titles, departments, or office locations.
+
+**Source-Only Access** (Start Date example): Only this plugin can read field values via API. Other users, admins, and integrations see empty options and no values. Useful for data that must be synchronized but should remain private, like employee start dates or internal identifiers. Even users cannot see their own values through the API.
+
+**Shared-Only Access** (Programs example): Users can only see field options and values they share with the target user. Only works with select and multiselect field types. Example: If Alice is in [Apples, Bananas] and Bob is in [Bananas, Oranges], Alice viewing Bob's profile only sees [Bananas] as their common program. Best for private categorical data where users should only discover shared attributes.
+
+### Protected Fields
+
+All three example fields are marked as "protected", which means only this plugin can modify field structure (add/remove options, change types) and write values. Users and admins cannot manually edit protected fields. Read access is controlled separately by the access mode.
+
+### UI Visibility vs Data Access
+
+The `visibility` attribute controls whether values appear in the Mattermost UI (user profiles, user cards), but does NOT affect data access via the API. Even if visibility is set to `hidden`, data can still be retrieved via API subject to access mode permissions. To control actual data access, use the `access_mode` attribute.
+
+### Choosing an Access Mode
+
+Consider your data sensitivity and use case:
+
+| Data Type | Recommended Mode | Example Fields |
+|-----------|------------------|----------------|
+| Public organizational info | Public | Job Title, Department, Office Location, Phone Extension |
+| Sensitive internal data | Source-Only | Start Date, Salary Band, Performance Rating, Employee ID |
+| Private categorical membership | Shared-Only | Programs, Projects, Teams, Certifications, Skills |
+
+**Note**: Source-only and shared-only modes require the field to be marked as protected. Shared-only mode can only be used with select or multiselect field types.
 
 ## Customization Guide
 
@@ -83,10 +115,11 @@ Edit `server/sync/field_sync.go` and add entries to the `fieldDefinitions` array
     Name:         "Department",
     ExternalName: "department",
     Type:         model.PropertyFieldTypeText,
+    AccessMode:   model.PropertyAccessModePublic, // Choose: Public, SourceOnly, or SharedOnly
 },
 ```
 
-Restart the plugin to create the new field.
+Restart the plugin to create the new field. See the Access Control section above for details on access modes.
 
 ### Changing Multiselect Options
 
