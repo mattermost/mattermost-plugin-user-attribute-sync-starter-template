@@ -33,6 +33,7 @@ type fieldDefinition struct {
 	ExternalName string                  // Name used in external data source
 	Type         model.PropertyFieldType // Field type (text, date, multiselect, etc.)
 	OptionNames  []string                // Option names for multiselect fields
+	AccessMode   string                  // Read permissions for field
 }
 
 // fieldDefinitions contains all Custom Profile Attribute fields this plugin creates.
@@ -43,17 +44,20 @@ var fieldDefinitions = []fieldDefinition{
 		Name:         "Job Title",
 		ExternalName: "job_title",
 		Type:         model.PropertyFieldTypeText,
+		AccessMode:   model.PropertyAccessModePublic,
 	},
 	{
 		Name:         "Programs",
 		ExternalName: "programs",
 		Type:         model.PropertyFieldTypeMultiselect,
-		OptionNames:  []string{"Apples", "Oranges", "Lemons"},
+		OptionNames:  []string{"Apples", "Oranges", "Lemons", "Grapes"},
+		AccessMode:   model.PropertyAccessModeSharedOnly,
 	},
 	{
 		Name:         "Start Date",
 		ExternalName: "start_date",
 		Type:         model.PropertyFieldTypeDate,
+		AccessMode:   model.PropertyAccessModeSourceOnly,
 	},
 }
 
@@ -70,8 +74,8 @@ func updateField(
 		"name", def.Name)
 
 	existingField.Type = def.Type
-	existingField.Attrs[model.CustomProfileAttributesPropertyAttrsVisibility] = model.CustomProfileAttributesVisibilityHidden
-	existingField.Attrs[model.CustomProfileAttributesPropertyAttrsManaged] = "admin"
+	existingField.Attrs[model.CustomProfileAttributesPropertyAttrsVisibility] = model.CustomProfileAttributesVisibilityAlways
+	existingField.Attrs[model.PropertyAttrsProtected] = true
 
 	if def.Type == model.PropertyFieldTypeMultiselect {
 		// Build options array with name only - Mattermost will generate IDs
@@ -108,10 +112,12 @@ func createField(
 		Name:    def.Name,
 		Type:    def.Type,
 		Attrs: model.StringInterface{
-			// Hidden from UI because data is managed externally
-			model.CustomProfileAttributesPropertyAttrsVisibility: model.CustomProfileAttributesVisibilityHidden,
-			// Admin-managed prevents users from editing and conflicting with sync
-			model.CustomProfileAttributesPropertyAttrsManaged: "admin",
+			// Always visible in UI so users can see the values
+			model.CustomProfileAttributesPropertyAttrsVisibility: model.CustomProfileAttributesVisibilityAlways,
+			// Protected to prevent admins from modifying field structure
+			model.PropertyAttrsProtected: true,
+			// Set configured read access mode
+			model.PropertyAttrsAccessMode: def.AccessMode,
 		},
 	}
 
