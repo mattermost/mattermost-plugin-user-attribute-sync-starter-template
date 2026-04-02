@@ -1,5 +1,7 @@
 # User Attribute Sync Starter Template
 
+**This is a starter template, not a production-ready plugin. It is meant to be forked and adapted to your own external data source and field definitions. Do not install it as-is expecting a working integration.**
+
 A Mattermost plugin starter template that demonstrates how to synchronize user profile attributes from external systems into Mattermost's Custom Profile Attributes (CPA). This template serves as both a working reference implementation and an educational resource for plugin developers.
 
 ## What This Template Demonstrates
@@ -33,8 +35,8 @@ Background Job (On timed interval)
 
 ### Prerequisites
 
-- Mattermost server 11.1.0 or later
-- Go 1.21 or later
+- Mattermost server 11.5.0 or later
+- Go 1.24 or later
 - Node v16 and npm v8 (if modifying webapp)
 
 ### Installation
