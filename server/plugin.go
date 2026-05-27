@@ -3,6 +3,7 @@ package main
 import (
 	"sync"
 
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 	"github.com/mattermost/mattermost/server/public/pluginapi/cluster"
@@ -23,8 +24,11 @@ type Plugin struct {
 	// fileProvider provides an example of syncing user attribute data from external source.
 	fileProvider attrsync.AttributeProvider
 
-	// cpaGroupID is ID of the standard group used for Custom Profile Attributes
-	cpaGroupID string
+	// groupID is the ID of the Mattermost property group this plugin reads and writes.
+	// We use the "access_control" group because user attribute fields defined here can be
+	// referenced from attribute-based access control (ABAC) policy rules — e.g. a channel
+	// policy that only admits users whose "Programs" includes "Apples".
+	groupID string
 
 	// fieldIDCache stores mappings from external field/option names to Mattermost-generated IDs
 	fieldIDCache *attrsync.FieldIDCache
@@ -41,17 +45,22 @@ type Plugin struct {
 func (p *Plugin) OnActivate() error {
 	p.client = pluginapi.NewClient(p.API, p.Driver)
 
-	// "custom_profile_attributes" is the standard group name for Custom Profile Attributes.
-	// This group is automatically created by Mattermost core and is used for all CPA fields.
-	group, err := p.client.Property.GetPropertyGroup("custom_profile_attributes")
+	// "access_control" is the property group whose fields can be referenced
+	// from attribute-based access control (ABAC) policy rules. We register
+	// our user attributes here so policies can evaluate against them (e.g.
+	// "only admit users whose Programs includes Apples"). Mattermost core
+	// registers the group automatically on server startup; we just look it
+	// up here to get the group ID we'll write fields and values against.
+	group, err := p.client.Property.GetPropertyGroup(model.AccessControlPropertyGroupName)
 	if err != nil {
-		return errors.Wrap(err, "failed to get Custom Profile Attributes group")
+		return errors.Wrap(err, "failed to get access_control property group")
 	}
-	p.cpaGroupID = group.ID
+	p.groupID = group.ID
 
-	// Sync field definitions on plugin activation and load their IDs
-	// Creates/updates CPA fields and stores the auto-generated IDs for use during value sync.
-	p.fieldIDCache, err = attrsync.SyncFields(p.client, p.cpaGroupID, manifest.Id)
+	// Sync field definitions on plugin activation and load their IDs.
+	// Creates/updates the user attribute fields and stores the auto-generated
+	// IDs for use during value sync.
+	p.fieldIDCache, err = attrsync.SyncFields(p.client, p.groupID, manifest.Id)
 	if err != nil {
 		return errors.Wrap(err, "failed to sync field definitions")
 	}
@@ -62,7 +71,7 @@ func (p *Plugin) OnActivate() error {
 
 	// Set up the attribute sync cluster job
 	// This job runs periodically to synchronize user attribute values from external
-	// sources to Mattermost Custom Profile Attributes. Using cluster.Schedule ensures
+	// sources into Mattermost user attribute fields. Using cluster.Schedule ensures
 	// only one server instance runs the job in multi-server deployments.
 	job, err := cluster.Schedule(
 		p.API,
