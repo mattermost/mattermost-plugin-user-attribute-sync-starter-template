@@ -14,7 +14,7 @@ The template creates three example user attribute fields that demonstrate differ
 
 ## Architecture Overview
 
-```
+```text
 Plugin Activation (Once)
   ├─> Create/Update User Attribute Fields
   └─> Start Background Job

@@ -109,6 +109,7 @@ func updateField(
 	existingField.Attrs[model.PropertyFieldAttrVisibility] = model.PropertyFieldVisibilityAlways
 	existingField.Attrs[model.PropertyFieldAttrDisplayName] = def.DisplayName
 	existingField.Attrs[model.PropertyAttrsProtected] = true
+	existingField.Attrs[model.PropertyAttrsAccessMode] = def.AccessMode
 	// See createField for why all three permission levels are set to sysadmin.
 	sysadmin := model.PermissionLevelSysadmin
 	existingField.PermissionField = &sysadmin

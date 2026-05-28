@@ -12,7 +12,7 @@ A **Mattermost plugin starter template** that synchronizes user attributes from 
 
 ## Architecture
 
-```
+```text
 Plugin Activation (Once)
   ├─> Create/Update User Attribute Fields (schema)
   └─> Start Background Job (cluster-aware)
