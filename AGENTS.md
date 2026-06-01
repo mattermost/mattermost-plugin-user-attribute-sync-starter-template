@@ -4,17 +4,17 @@ Detailed context for AI agents working on this codebase.
 
 ## What This Project Is
 
-A **Mattermost plugin starter template** that synchronizes user profile attributes from external systems into Mattermost's Custom Profile Attributes (CPA). It's a reference implementation and educational resource — designed to be read, understood, and adapted. This is not a plugin that can be used as-is as a plug-and-play solution. It is expected that a developer takes this and uses it as the foundation of their own custom plugin.
+A **Mattermost plugin starter template** that synchronizes user attributes from an external system into Mattermost. The synced attributes appear on user profiles in the UI and are also addressable as `user.attributes.<field_name>` from attribute-based access control (ABAC) policy rules — which is why the plugin writes into the `access_control` property group. It's a reference implementation and educational resource — designed to be read, understood, and adapted. This is not a plugin that can be used as-is as a plug-and-play solution. It is expected that a developer takes this and uses it as the foundation of their own custom plugin.
 
 **Plugin ID:** `com.mattermost.user-attribute-sync-starter-template`
-**Min Mattermost version:** 11.5.0
-**Languages:** Go 1.24+ (server), TypeScript/React (webapp)
+**Min Mattermost version:** 11.8.0
+**Languages:** Go 1.26.3+ (server), TypeScript/React (webapp)
 
 ## Architecture
 
-```
+```text
 Plugin Activation (Once)
-  ├─> Create/Update CPA Fields (schema)
+  ├─> Create/Update User Attribute Fields (schema)
   └─> Start Background Job (cluster-aware)
 
 Background Job (Configurable interval, default 60min)
@@ -24,7 +24,9 @@ Background Job (Configurable interval, default 60min)
 
 The plugin has two phases:
 1. **Field sync** — Creates/updates field definitions (schema) in Mattermost on activation
-2. **Value sync** — Periodically fetches user data from a provider and writes values to CPA
+2. **Value sync** — Periodically fetches user data from a provider and writes per-user values
+
+All fields and values are stored in the `access_control` property group (`model.AccessControlPropertyGroupName`), with `ObjectType=user` and `TargetType=system`. Living in that group is what makes the fields addressable from ABAC policy expressions.
 
 ## Key Files and Their Roles
 
@@ -36,7 +38,7 @@ The plugin has two phases:
 | `server/job.go` | Cluster-aware job scheduling via `cluster.Schedule()`. Contains `nextWaitInterval()` (calculates delay) and `runSync()` (executes sync). |
 | `server/configuration.go` | Thread-safe config management with RWMutex. Settings: `SyncIntervalMinutes` (default 60). |
 | `server/sync/provider.go` | `AttributeProvider` interface: `GetUserAttributes() ([]map[string]interface{}, error)` and `Close() error`. |
-| `server/sync/field_sync.go` | Field definitions array and schema management. Creates/updates CPA fields. Maintains `FieldIDCache` mapping external names to Mattermost-generated IDs. |
+| `server/sync/field_sync.go` | Field definitions array and schema management. Creates/updates user attribute fields. Maintains `FieldIDCache` mapping external names to Mattermost-generated IDs. |
 | `server/sync/value_sync.go` | `SyncUsers()` — matches users by email, builds PropertyValue objects, bulk upserts. Handles text, date, and multiselect value types. |
 | `server/sync/file_provider.go` | Example `AttributeProvider` implementation. Reads JSON from Mattermost data directory. Tracks file modification time for incremental sync. |
 | `server/main.go` | Plugin entry point (minimal). |
@@ -61,7 +63,7 @@ The plugin has two phases:
 
 ## Field Definitions
 
-Defined in `server/sync/field_sync.go` we have a few example field definitions in the `fieldDefinitions` array:
+Defined in `server/sync/field_sync.go` we have a few example user attribute field definitions in the `fieldDefinitions` array:
 
 1. **Job Title** — `job_title`, Text type, Public access
 2. **Programs** — `programs`, Multiselect type, SharedOnly access, options: Apples/Oranges/Lemons/Grapes
@@ -142,7 +144,7 @@ make logs-watch         # Tail plugin logs on running server
 
 Used via `pluginapi.Client`:
 
-- `Property.GetPropertyGroup(name)` — Fetch CPA group
+- `Property.GetPropertyGroup(name)` — Fetch the `access_control` property group
 - `Property.GetPropertyFieldByName(groupID, objectID, fieldName)` — Lookup field by name
 - `Property.CreatePropertyField(field)` — Create field (returns generated ID)
 - `Property.UpdatePropertyField(groupID, field)` — Modify existing field

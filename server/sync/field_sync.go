@@ -27,12 +27,21 @@ func (c *FieldIDCache) GetOptionID(optionName string) string {
 	return c.OptionNameToID[optionName]
 }
 
-// fieldDefinition defines a Custom Profile Attribute field schema.
+// fieldDefinition defines a user attribute field schema.
 type fieldDefinition struct {
-	Name         string                  // Display name shown in UI
-	ExternalName string                  // Name used in external data source
-	Type         model.PropertyFieldType // Field type (text, date, multiselect, etc.)
-	OptionNames  []string                // Option names for multiselect fields
+	// Name is the canonical field identifier. It must match ^[A-Za-z_][A-Za-z0-9_]*$
+	// because Mattermost references the name from ABAC policy expressions as
+	// user.attributes.<name> (a CEL identifier), so spaces and punctuation are
+	// rejected. We also use this name as the lookup key when matching attributes
+	// from the external data source — the JSON file's keys must match these names.
+	Name string
+
+	// DisplayName is the human-readable label shown in user-facing UI. Free-form
+	// text; no character restrictions.
+	DisplayName string
+
+	Type        model.PropertyFieldType // Field type (text, date, multiselect, etc.)
+	OptionNames []string                // Option names for multiselect fields
 	// AccessMode controls who can read this field's values. Three modes:
 	//   - Public (empty string): Everyone can read all field options and values
 	//   - SourceOnly: Only this plugin can read values; others see empty options and no values
@@ -43,9 +52,11 @@ type fieldDefinition struct {
 	AccessMode string
 }
 
-// fieldDefinitions contains all Custom Profile Attribute fields this plugin creates.
-// Custom Profile Attributes (CPAs) are user metadata fields that appear in user profiles.
-// This plugin ensures these fields exist on startup and syncs external data into them.
+// fieldDefinitions contains all user attribute fields this plugin creates.
+// These are per-user metadata fields stored in the access_control property
+// group, so they appear on user profiles and can also be referenced from
+// attribute-based access control (ABAC) policy rules. This plugin ensures
+// these fields exist on startup and syncs external data into them.
 //
 // Access Control Examples:
 // The fields below demonstrate the three available access control modes. These are examples
@@ -58,31 +69,31 @@ type fieldDefinition struct {
 var fieldDefinitions = []fieldDefinition{
 	{
 		// Public Access Example: Job titles are visible to everyone in the organization
-		Name:         "Job Title",
-		ExternalName: "job_title",
-		Type:         model.PropertyFieldTypeText,
-		AccessMode:   model.PropertyAccessModePublic,
+		Name:        "job_title",
+		DisplayName: "Job Title",
+		Type:        model.PropertyFieldTypeText,
+		AccessMode:  model.PropertyAccessModePublic,
 	},
 	{
 		// Shared-Only Access Example: Users can only see programs they have in common
 		// If viewing another user's profile, you'll only see programs you're both in
-		Name:         "Programs",
-		ExternalName: "programs",
-		Type:         model.PropertyFieldTypeMultiselect,
-		OptionNames:  []string{"Apples", "Oranges", "Lemons", "Grapes"},
-		AccessMode:   model.PropertyAccessModeSharedOnly,
+		Name:        "programs",
+		DisplayName: "Programs",
+		Type:        model.PropertyFieldTypeMultiselect,
+		OptionNames: []string{"Apples", "Oranges", "Lemons", "Grapes"},
+		AccessMode:  model.PropertyAccessModeSharedOnly,
 	},
 	{
 		// Source-Only Access Example: Start dates are private - only this plugin can read them
 		// Useful for data that should be synchronized but not visible to users or other systems
-		Name:         "Start Date",
-		ExternalName: "start_date",
-		Type:         model.PropertyFieldTypeDate,
-		AccessMode:   model.PropertyAccessModeSourceOnly,
+		Name:        "start_date",
+		DisplayName: "Start Date",
+		Type:        model.PropertyFieldTypeDate,
+		AccessMode:  model.PropertyAccessModeSourceOnly,
 	},
 }
 
-// updateField updates an existing CPA field to match the definition.
+// updateField updates an existing user attribute field to match the definition.
 // Returns the updated field.
 func updateField(
 	client *pluginapi.Client,
@@ -95,8 +106,15 @@ func updateField(
 		"name", def.Name)
 
 	existingField.Type = def.Type
-	existingField.Attrs[model.CustomProfileAttributesPropertyAttrsVisibility] = model.CustomProfileAttributesVisibilityAlways
+	existingField.Attrs[model.PropertyFieldAttrVisibility] = model.PropertyFieldVisibilityAlways
+	existingField.Attrs[model.PropertyFieldAttrDisplayName] = def.DisplayName
 	existingField.Attrs[model.PropertyAttrsProtected] = true
+	existingField.Attrs[model.PropertyAttrsAccessMode] = def.AccessMode
+	// See createField for why all three permission levels are set to sysadmin.
+	sysadmin := model.PermissionLevelSysadmin
+	existingField.PermissionField = &sysadmin
+	existingField.PermissionValues = &sysadmin
+	existingField.PermissionOptions = &sysadmin
 
 	if def.Type == model.PropertyFieldTypeMultiselect {
 		// Build options array with name only - Mattermost will generate IDs
@@ -118,7 +136,7 @@ func updateField(
 	return updatedField, nil
 }
 
-// createField creates a new CPA field from the definition.
+// createField creates a new user attribute field from the definition.
 // Returns the newly created field.
 func createField(
 	client *pluginapi.Client,
@@ -127,17 +145,63 @@ func createField(
 ) (*model.PropertyField, error) {
 	client.Log.Info("Field does not exist, creating", "name", def.Name)
 
+	// These three permission levels describe who, role-wise, can edit the
+	// field definition (PermissionField), write a user's value
+	// (PermissionValues), or change the multiselect options (PermissionOptions).
+	//
+	// For this plugin they're largely a formality: every field we create is
+	// protected, so only the plugin can write through the source_plugin_id
+	// mechanism, and source_only/shared_only access modes already restrict
+	// who can read the values — even admins can't see source_only fields.
+	// Mattermost also pins PermissionField and PermissionOptions to sysadmin
+	// itself for any field in the access_control group, so those two are
+	// truly no-ops here.
+	//
+	// Even so, our shared_only field forces us to set PermissionValues. The
+	// default for user fields lets members edit their own value, and
+	// Mattermost rejects that combined with shared_only — if anyone could
+	// pick any value, they could fake having something in common with
+	// anyone. Setting PermissionValues to sysadmin clears that check. We
+	// set the other two to sysadmin alongside it so all three read the same
+	// way.
+	sysadmin := model.PermissionLevelSysadmin
+
 	field := &model.PropertyField{
 		// ID left empty - Mattermost will auto-generate
-		GroupID: groupID,
-		Name:    def.Name,
-		Type:    def.Type,
+		GroupID:           groupID,
+		Name:              def.Name,
+		Type:              def.Type,
+		PermissionField:   &sysadmin,
+		PermissionValues:  &sysadmin,
+		PermissionOptions: &sysadmin,
+
+		// ObjectType declares what kind of object this field describes. This is a
+		// user attribute sync plugin, so every field describes users and we pin
+		// ObjectType to "user". Mattermost uses this to route field queries — for
+		// example, the user-profile UI asks for fields with ObjectType=user, and
+		// ABAC policy evaluation looks up user.attributes.<field> against the
+		// same set.
+		ObjectType: model.PropertyFieldObjectTypeUser,
+
+		// TargetType declares the scope at which the field definition lives.
+		// "system" means the field is defined once globally and applies to every
+		// user on the server. The other options ("team", "channel") would scope
+		// the field to a specific team or channel, which is not what we want for
+		// org-wide profile attributes. With TargetType=system, TargetID must be
+		// empty (the system has no per-entity ID).
+		TargetType: string(model.PropertyFieldTargetLevelSystem),
+
 		Attrs: model.StringInterface{
+			// DisplayName is the user-facing label rendered in profile cards and the
+			// System Console. Mattermost's Name field is a CEL identifier and can't
+			// contain spaces or punctuation, so anything human-readable lives here.
+			model.PropertyFieldAttrDisplayName: def.DisplayName,
+
 			// Visibility controls whether values appear in the UI (user profiles/cards).
 			// This does NOT affect data access via API - use AccessMode for that.
 			// "Always" makes values visible in the UI. "Hidden" hides them from UI but
 			// data can still be retrieved via API (subject to AccessMode permissions).
-			model.CustomProfileAttributesPropertyAttrsVisibility: model.CustomProfileAttributesVisibilityAlways,
+			model.PropertyFieldAttrVisibility: model.PropertyFieldVisibilityAlways,
 
 			// Protected means only this plugin can:
 			//   - Modify field structure (add/remove options, change field type)
@@ -205,7 +269,7 @@ func isFieldOwnedByPlugin(
 	return true
 }
 
-// syncSingleField ensures a single CPA field exists and matches the definition.
+// syncSingleField ensures a single user attribute field exists and matches the definition.
 // Updates the cache with field and option IDs. Returns the field ID or error.
 func syncSingleField(
 	client *pluginapi.Client,
@@ -240,7 +304,7 @@ func syncSingleField(
 	}
 
 	// Store the field name to ID mapping
-	cache.FieldNameToID[def.ExternalName] = field.ID
+	cache.FieldNameToID[def.Name] = field.ID
 
 	// For multiselect fields, extract option IDs
 	if def.Type == model.PropertyFieldTypeMultiselect && len(def.OptionNames) > 0 {
@@ -302,7 +366,7 @@ func extractOptionIDs(
 	return nil
 }
 
-// SyncFields ensures all CPA fields exist and match the definitions.
+// SyncFields ensures all user attribute fields exist and match the definitions.
 // Returns a FieldIDCache containing mappings from external names to Mattermost-generated IDs.
 //
 //nolint:revive

@@ -1,7 +1,7 @@
 package sync
 
 // AttributeProvider defines the interface for data sources that provide user attributes
-// to be synchronized into Mattermost's Custom Profile Attributes system.
+// to be synchronized as Mattermost user attribute fields.
 //
 // The interface is designed to be stateless from the caller's perspective - the provider
 // implementation is responsible for tracking its own state (e.g., last read time, pagination

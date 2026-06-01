@@ -42,7 +42,7 @@ func (p *Plugin) nextWaitInterval(now time.Time, metadata cluster.JobMetadata) t
 // runSync executes the user attribute value synchronization workflow.
 //
 // This function runs periodically (at the interval configured in plugin settings) to synchronize
-// user attribute values from external sources into Mattermost Custom Profile Attributes.
+// user attribute values from external sources into Mattermost user attribute fields.
 //
 // Note: Field schema synchronization (creating/updating PropertyFields) happens
 // once during plugin activation in OnActivate().
@@ -64,7 +64,7 @@ func (p *Plugin) runSync() {
 	p.client.Log.Info("Fetched users for sync", "count", len(users))
 
 	// Sync user values using the field ID cache loaded during activation
-	err = sync.SyncUsers(p.client, p.cpaGroupID, users, p.fieldIDCache)
+	err = sync.SyncUsers(p.client, p.groupID, users, p.fieldIDCache)
 	if err != nil {
 		p.client.Log.Error("Failed to sync user values", "error", err.Error())
 		return

@@ -2,21 +2,21 @@
 
 **This is a starter template, not a production-ready plugin. It is meant to be forked and adapted to your own external data source and field definitions. Do not install it as-is expecting a working integration.**
 
-A Mattermost plugin starter template that demonstrates how to synchronize user profile attributes from external systems into Mattermost's Custom Profile Attributes (CPA). This template serves as both a working reference implementation and an educational resource for plugin developers.
+A Mattermost plugin starter template that demonstrates how to synchronize user attributes from an external system into Mattermost. Synced attributes appear on user profiles in the UI and can also be referenced from attribute-based access control (ABAC) policy rules — this is why the plugin writes into the `access_control` property group rather than a plugin-private group. The template serves as both a working reference implementation and an educational resource for plugin developers.
 
 ## What This Template Demonstrates
 
-Mattermost's Custom Profile Attributes system (also called Properties) allows you to store structured metadata about users. A **field** defines the schema (name, type, options), while a **value** stores the actual data for a specific user. For multiselect fields, **options** define the allowed choices that users can select from.
+Mattermost's property system lets you store structured per-user metadata. A **field** defines the schema (name, type, options), while a **value** stores the actual data for a specific user. For multiselect fields, **options** define the allowed choices. Fields written into the `access_control` group also become available as `user.attributes.<field_name>` inside ABAC policy expressions.
 
-This plugin demonstrates how to create fields with hardcoded definitions and synchronize values from external data sources. Fields are defined explicitly in code with their types (text, date, multiselect), and the plugin uses Mattermost's cluster job system to run periodic synchronization tasks. The implementation includes incremental synchronization that processes only changed data after the initial sync.
+This plugin shows how to create fields with hardcoded definitions and synchronize values from external data sources. Fields are defined explicitly in code with their types (text, date, multiselect), and the plugin uses Mattermost's cluster job system to run periodic synchronization tasks. The implementation includes incremental synchronization that processes only changed data after the initial sync.
 
-The template creates three example fields that demonstrate different access control modes: Job Title (text, public access), Programs (multiselect with options, shared-only access), and Start Date (date, source-only access). All fields are marked as visible in the UI and protected (only this plugin can modify structure and write values).
+The template creates three example user attribute fields that demonstrate different access control modes: Job Title (text, public access), Programs (multiselect with options, shared-only access), and Start Date (date, source-only access). All fields are marked as visible in the UI and protected (only this plugin can modify structure and write values).
 
 ## Architecture Overview
 
-```
+```text
 Plugin Activation (Once)
-  ├─> Create/Update CPA Fields
+  ├─> Create/Update User Attribute Fields
   └─> Start Background Job
 
 Background Job (On timed interval)
@@ -35,8 +35,8 @@ Background Job (On timed interval)
 
 ### Prerequisites
 
-- Mattermost server 11.5.0 or later
-- Go 1.24 or later
+- Mattermost server 11.8.0 or later
+- Go 1.26.3 or later (matches the version Mattermost server pins)
 - Node v16 and npm v8 (if modifying webapp)
 
 ### Installation
@@ -66,13 +66,13 @@ Background Job (On timed interval)
 
 ## What to Expect
 
-When the plugin activates, it creates the three Custom Profile Attribute fields (Job Title, Programs, and Start Date) in Mattermost. These fields appear in System Console → User Attributes. If the fields already exist from a previous activation, the plugin updates them to match the hardcoded definitions.
+When the plugin activates, it creates the three user attribute fields (Job Title, Programs, and Start Date) in Mattermost. These fields appear in System Console → User Attributes. If the fields already exist from a previous activation, the plugin updates them to match the hardcoded definitions.
 
-Immediately after activation, the plugin runs its first synchronization. It reads the `user_attributes.json` file from the Mattermost data directory, matches users by email address, and populates the Custom Profile Attribute values for each user found in the data file. The plugin logs its progress and any errors (such as users not found in Mattermost) during this process.
+Immediately after activation, the plugin runs its first synchronization. It reads the `user_attributes.json` file from the Mattermost data directory, matches users by email address, and populates the user attribute values for each user found in the data file. The plugin logs its progress and any errors (such as users not found in Mattermost) during this process.
 
 After the initial sync, the plugin checks for changes every 60 minutes by default. The file provider tracks the modification time of `user_attributes.json` and only processes the file if it has been modified since the last sync. When changes are detected, the plugin syncs all users in the file again. You can adjust the sync interval in the plugin configuration settings.
 
-The synced attribute values are stored as Custom Profile Attributes and can be viewed in System Console → User Attributes or through the Mattermost API.
+The synced user attribute values can be viewed in System Console → User Attributes or through the Mattermost API, and they are also available to ABAC policy rules as `user.attributes.<field_name>`.
 
 ## Access Control
 

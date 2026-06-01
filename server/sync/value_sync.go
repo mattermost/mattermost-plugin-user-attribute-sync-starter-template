@@ -132,7 +132,7 @@ func buildPropertyValues(api *pluginapi.Client, user *model.User, groupID string
 	return values, nil
 }
 
-// SyncUsers writes attribute values from external data into Mattermost CPAs for all users.
+// SyncUsers writes attribute values from external data into Mattermost user attribute fields for all users.
 //
 //nolint:revive
 func SyncUsers(api *pluginapi.Client, groupID string, users []map[string]interface{}, cache *FieldIDCache) error {
