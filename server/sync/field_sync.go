@@ -2,6 +2,8 @@ package sync
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
@@ -13,7 +15,7 @@ import (
 type FieldIDCache struct {
 	// Maps external field names (e.g., "job_title") to Mattermost field IDs
 	FieldNameToID map[string]string
-	// Maps multiselect option names (e.g., "Apples") to Mattermost option IDs for all multiselect fields
+	// Maps option names (e.g., "Apples") to Mattermost option IDs for all select/multiselect/rank fields
 	OptionNameToID map[string]string
 }
 
@@ -22,7 +24,7 @@ func (c *FieldIDCache) GetFieldID(fieldName string) string {
 	return c.FieldNameToID[fieldName]
 }
 
-// GetOptionID translates a multiselect option name to its Mattermost option ID.
+// GetOptionID translates a select/multiselect/rank option name to its Mattermost option ID.
 func (c *FieldIDCache) GetOptionID(optionName string) string {
 	return c.OptionNameToID[optionName]
 }
@@ -40,15 +42,15 @@ type fieldDefinition struct {
 	// text; no character restrictions.
 	DisplayName string
 
-	Type        model.PropertyFieldType // Field type (text, date, multiselect, etc.)
-	OptionNames []string                // Option names for multiselect fields
+	Type    model.PropertyFieldType                     // Field type (text, date, multiselect, etc.)
+	Options []model.CustomProfileAttributesSelectOption // Options for select, multiselect, and rank fields
 	// AccessMode controls who can read this field's values. Three modes:
 	//   - Public (empty string): Everyone can read all field options and values
 	//   - SourceOnly: Only this plugin can read values; others see empty options and no values
 	//   - SharedOnly: Users only see field options and values they share with the target user
-	//                 (Only valid for select/multiselect fields. Example: If Alice selected
+	//                 (Only valid for select/multiselect/rank fields. Example: If Alice selected
 	//                  [Apples, Bananas] and Bob selected [Bananas, Oranges], Alice querying
-	//                  Bob's values would only see [Bananas])
+	//                  Bob's values would only see [Bananas]).  Ranks will their own ranks and lower.
 	AccessMode string
 }
 
@@ -80,8 +82,28 @@ var fieldDefinitions = []fieldDefinition{
 		Name:        "programs",
 		DisplayName: "Programs",
 		Type:        model.PropertyFieldTypeMultiselect,
-		OptionNames: []string{"Apples", "Oranges", "Lemons", "Grapes"},
-		AccessMode:  model.PropertyAccessModeSharedOnly,
+		Options: []model.CustomProfileAttributesSelectOption{
+			{Name: "Apples"},
+			{Name: "Oranges"},
+			{Name: "Lemons"},
+			{Name: "Grapes"},
+		},
+		AccessMode: model.PropertyAccessModeSharedOnly,
+	},
+	{
+		// Shared-Only Access Example using the Rank type (requires Mattermost server v11.9 or later - see release notes).
+		// Rank types are similar to Select, with the addition that each value includes a numerical representation that
+		// can support inequality comparisons (e.g. Clearance >= "Secret")
+		Name:        "clearance",
+		DisplayName: "Clearance",
+		Type:        model.PropertyFieldTypeRank,
+		Options: []model.CustomProfileAttributesSelectOption{
+			{Name: "CUI", Rank: model.NewPointer(1)},
+			{Name: "Confidential", Rank: model.NewPointer(2)},
+			{Name: "Secret", Rank: model.NewPointer(3)},
+			{Name: "Top Secret", Rank: model.NewPointer(4)},
+		},
+		AccessMode: model.PropertyAccessModeSharedOnly,
 	},
 	{
 		// Source-Only Access Example: Start dates are private - only this plugin can read them
@@ -91,6 +113,22 @@ var fieldDefinitions = []fieldDefinition{
 		Type:        model.PropertyFieldTypeDate,
 		AccessMode:  model.PropertyAccessModeSourceOnly,
 	},
+}
+
+var fieldTypesWithOptions = []model.PropertyFieldType{
+	model.PropertyFieldTypeSelect,
+	model.PropertyFieldTypeMultiselect,
+	model.PropertyFieldTypeRank,
+}
+
+func getRankFieldNames() []string {
+	var rankFields []string
+	for _, field := range fieldDefinitions {
+		if field.Type == model.PropertyFieldTypeRank {
+			rankFields = append(rankFields, field.Name)
+		}
+	}
+	return rankFields
 }
 
 // updateField updates an existing user attribute field to match the definition.
@@ -116,13 +154,11 @@ func updateField(
 	existingField.PermissionValues = &sysadmin
 	existingField.PermissionOptions = &sysadmin
 
-	if def.Type == model.PropertyFieldTypeMultiselect {
+	if slices.Contains(fieldTypesWithOptions, def.Type) {
 		// Build options array with name only - Mattermost will generate IDs
-		options := make([]interface{}, len(def.OptionNames))
-		for i, optionName := range def.OptionNames {
-			options[i] = map[string]interface{}{
-				"name": optionName,
-			}
+		options, err := buildOptionsArr(def)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to update existing field %s", def.Name)
 		}
 		existingField.Attrs[model.PropertyFieldAttributeOptions] = options
 	}
@@ -134,6 +170,22 @@ func updateField(
 
 	client.Log.Info("Updated field successfully", "field_id", updatedField.ID, "name", def.Name)
 	return updatedField, nil
+}
+
+func buildOptionsArr(def fieldDefinition) ([]interface{}, error) {
+	options := make([]interface{}, len(def.Options))
+	for i, option := range def.Options {
+		attrs := map[string]interface{}{"name": option.Name}
+		// Don't forget to add in the option's rank value for Rank fields types
+		if def.Type == model.PropertyFieldTypeRank {
+			if option.Rank == nil {
+				return nil, fmt.Errorf("encountered a missing rank for existing field %s", def.Name)
+			}
+			attrs["rank"] = *option.Rank
+		}
+		options[i] = attrs
+	}
+	return options, nil
 }
 
 // createField creates a new user attribute field from the definition.
@@ -218,13 +270,11 @@ func createField(
 	}
 
 	// Multiselect fields need their options defined
-	if def.Type == model.PropertyFieldTypeMultiselect {
+	if slices.Contains(fieldTypesWithOptions, def.Type) {
 		// Build options array with name only - Mattermost will generate IDs
-		options := make([]interface{}, len(def.OptionNames))
-		for i, optionName := range def.OptionNames {
-			options[i] = map[string]interface{}{
-				"name": optionName,
-			}
+		options, err := buildOptionsArr(def)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to create field %s", def.Name)
 		}
 		field.Attrs[model.PropertyFieldAttributeOptions] = options
 	}
@@ -306,8 +356,8 @@ func syncSingleField(
 	// Store the field name to ID mapping
 	cache.FieldNameToID[def.Name] = field.ID
 
-	// For multiselect fields, extract option IDs
-	if def.Type == model.PropertyFieldTypeMultiselect && len(def.OptionNames) > 0 {
+	// For supported field types, extract option IDs
+	if slices.Contains(fieldTypesWithOptions, def.Type) && len(def.Options) > 0 {
 		if err := extractOptionIDs(client, field, def, cache); err != nil {
 			client.Log.Error("Failed to extract option IDs",
 				"name", def.Name,
@@ -320,7 +370,7 @@ func syncSingleField(
 	return field.ID, nil
 }
 
-// extractOptionIDs extracts option IDs from a multiselect field into the cache.
+// extractOptionIDs extracts option IDs from a field into the cache (if applicable).
 // Avoids adding duplicate options with the same name.
 func extractOptionIDs(
 	client *pluginapi.Client,
@@ -345,7 +395,7 @@ func extractOptionIDs(
 		return errors.Wrap(err, "failed to unmarshal options")
 	}
 
-	// Build option name to ID mapping for all multiselect fields
+	// Build option name to ID mapping for all supported fields
 	for _, opt := range options {
 		name, nameOk := opt["name"].(string)
 		id, idOk := opt["id"].(string)

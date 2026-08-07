@@ -3,6 +3,7 @@ package sync
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
@@ -38,6 +39,16 @@ func formatMultiselectValue(fieldName string, values []string, cache *FieldIDCac
 	}
 
 	return json.RawMessage(marshaled), nil
+}
+
+func formatRankValue(fieldName, value string, cache *FieldIDCache) (json.RawMessage, error) {
+	// Translate option name to ID
+	optionID := cache.GetOptionID(value)
+	if optionID == "" {
+		return nil, fmt.Errorf("unknown option %q for field %s", value, fieldName)
+	}
+
+	return formatStringValue(optionID)
 }
 
 // buildPropertyValue creates a single PropertyValue for a user attribute.
@@ -85,8 +96,14 @@ func buildPropertyValue(
 		formattedValue, formatErr = formatMultiselectValue(fieldName, v, cache)
 
 	case string:
-		// Text or date
-		formattedValue, formatErr = formatStringValue(v)
+		// Need to check if this is a rank or a normal text or date field.
+		// Rank values need to send an option ID instead of just the name.
+		if slices.Contains(getRankFieldNames(), fieldName) {
+			formattedValue, formatErr = formatRankValue(fieldName, v, cache)
+		} else {
+			// Text or date
+			formattedValue, formatErr = formatStringValue(v)
+		}
 
 	default:
 		api.Log.Warn("Unsupported field value type, skipping field",
@@ -106,7 +123,7 @@ func buildPropertyValue(
 
 	propertyValue := &model.PropertyValue{
 		GroupID:    groupID,
-		TargetType: "user",
+		TargetType: model.PropertyValueTargetTypeUser,
 		TargetID:   user.Id,
 		FieldID:    fieldID,
 		Value:      formattedValue,
