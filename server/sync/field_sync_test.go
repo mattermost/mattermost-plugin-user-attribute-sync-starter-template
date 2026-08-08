@@ -132,7 +132,7 @@ func TestSyncFields(t *testing.T) {
 			ID:      "existing_id_3",
 			GroupID: groupID,
 			Name:    "clearance",
-			Type:    model.PropertyFieldTypeMultiselect,
+			Type:    model.PropertyFieldTypeRank,
 			Attrs: model.StringInterface{
 				model.PropertyAttrsSourcePluginID: pluginID,
 				model.PropertyFieldAttributeOptions: []interface{}{

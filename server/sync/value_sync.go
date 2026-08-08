@@ -3,7 +3,6 @@ package sync
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
@@ -41,7 +40,7 @@ func formatMultiselectValue(fieldName string, values []string, cache *FieldIDCac
 	return json.RawMessage(marshaled), nil
 }
 
-func formatRankValue(fieldName, value string, cache *FieldIDCache) (json.RawMessage, error) {
+func formatOptionValue(fieldName, value string, cache *FieldIDCache) (json.RawMessage, error) {
 	// Translate option name to ID
 	optionID := cache.GetOptionID(value)
 	if optionID == "" {
@@ -96,10 +95,9 @@ func buildPropertyValue(
 		formattedValue, formatErr = formatMultiselectValue(fieldName, v, cache)
 
 	case string:
-		// Need to check if this is a rank or a normal text or date field.
-		// Rank values need to send an option ID instead of just the name.
-		if slices.Contains(getRankFieldNames(), fieldName) {
-			formattedValue, formatErr = formatRankValue(fieldName, v, cache)
+		// Based on the field type, this can be an option or just plain text.
+		if def, ok := fieldDefinitionsByName[fieldName]; ok && def.Type == model.PropertyFieldTypeRank {
+			formattedValue, formatErr = formatOptionValue(fieldName, v, cache)
 		} else {
 			// Text or date
 			formattedValue, formatErr = formatStringValue(v)

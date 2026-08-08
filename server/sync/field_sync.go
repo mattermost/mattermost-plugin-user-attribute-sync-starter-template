@@ -3,7 +3,6 @@ package sync
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
@@ -50,7 +49,8 @@ type fieldDefinition struct {
 	//   - SharedOnly: Users only see field options and values they share with the target user
 	//                 (Only valid for select/multiselect/rank fields. Example: If Alice selected
 	//                  [Apples, Bananas] and Bob selected [Bananas, Oranges], Alice querying
-	//                  Bob's values would only see [Bananas]).  Ranks will their own ranks and lower.
+	//                  Bob's values would only see [Bananas]).
+	// 					Note: Ranks will see their own ranks and lower.
 	AccessMode string
 }
 
@@ -115,20 +115,33 @@ var fieldDefinitions = []fieldDefinition{
 	},
 }
 
-var fieldTypesWithOptions = []model.PropertyFieldType{
-	model.PropertyFieldTypeSelect,
-	model.PropertyFieldTypeMultiselect,
-	model.PropertyFieldTypeRank,
+// fieldDefinitionsByName indexes fieldDefinitions by Name so value sync can
+// look up a field's definition from the key it sees in the external data.
+// Go initializes package-level variables in dependency order, so this is
+// populated after fieldDefinitions regardless of declaration order.
+var fieldDefinitionsByName = indexFieldDefinitions(fieldDefinitions)
+
+func indexFieldDefinitions(defs []fieldDefinition) map[string]fieldDefinition {
+	byName := make(map[string]fieldDefinition, len(defs))
+	for _, def := range defs {
+		byName[def.Name] = def
+	}
+	return byName
 }
 
-func getRankFieldNames() []string {
-	var rankFields []string
-	for _, field := range fieldDefinitions {
-		if field.Type == model.PropertyFieldTypeRank {
-			rankFields = append(rankFields, field.Name)
-		}
+// hasOptions reports whether this field type declares its allowed values as a
+// set of named options. Mattermost generates an ID for each option, which is
+// why values for these fields are written as option IDs rather than names --
+// see formatOptionValue and formatMultiselectValue.
+func (def fieldDefinition) hasOptions() bool {
+	switch def.Type {
+	case model.PropertyFieldTypeSelect,
+		model.PropertyFieldTypeMultiselect,
+		model.PropertyFieldTypeRank:
+		return true
+	default:
+		return false
 	}
-	return rankFields
 }
 
 // updateField updates an existing user attribute field to match the definition.
@@ -154,7 +167,7 @@ func updateField(
 	existingField.PermissionValues = &sysadmin
 	existingField.PermissionOptions = &sysadmin
 
-	if slices.Contains(fieldTypesWithOptions, def.Type) {
+	if def.hasOptions() {
 		// Build options array with name only - Mattermost will generate IDs
 		options, err := buildOptionsArr(def)
 		if err != nil {
@@ -179,7 +192,7 @@ func buildOptionsArr(def fieldDefinition) ([]interface{}, error) {
 		// Don't forget to add in the option's rank value for Rank fields types
 		if def.Type == model.PropertyFieldTypeRank {
 			if option.Rank == nil {
-				return nil, fmt.Errorf("encountered a missing rank for existing field %s", def.Name)
+				return nil, fmt.Errorf("encountered a missing rank for field %s", def.Name)
 			}
 			attrs["rank"] = *option.Rank
 		}
@@ -269,8 +282,8 @@ func createField(
 		},
 	}
 
-	// Multiselect fields need their options defined
-	if slices.Contains(fieldTypesWithOptions, def.Type) {
+	// Select / Multiselect / Rank fields need their options defined
+	if def.hasOptions() {
 		// Build options array with name only - Mattermost will generate IDs
 		options, err := buildOptionsArr(def)
 		if err != nil {
@@ -357,7 +370,7 @@ func syncSingleField(
 	cache.FieldNameToID[def.Name] = field.ID
 
 	// For supported field types, extract option IDs
-	if slices.Contains(fieldTypesWithOptions, def.Type) && len(def.Options) > 0 {
+	if def.hasOptions() && len(def.Options) > 0 {
 		if err := extractOptionIDs(client, field, def, cache); err != nil {
 			client.Log.Error("Failed to extract option IDs",
 				"name", def.Name,

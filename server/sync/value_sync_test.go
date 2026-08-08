@@ -174,7 +174,7 @@ func TestFormatRankValue(t *testing.T) {
 	cache := testFieldIDCache()
 
 	t.Run("valid option value", func(t *testing.T) {
-		result, err := formatRankValue("clearance", "Confidential", cache)
+		result, err := formatOptionValue("clearance", "Confidential", cache)
 		require.NoError(t, err)
 
 		var decoded string
@@ -184,7 +184,7 @@ func TestFormatRankValue(t *testing.T) {
 	})
 
 	t.Run("unknown option returns error", func(t *testing.T) {
-		_, err := formatRankValue("clearance", "Value2", cache)
+		_, err := formatOptionValue("clearance", "Value2", cache)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown option")
 		assert.Contains(t, err.Error(), "Value2")
