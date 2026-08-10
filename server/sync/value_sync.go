@@ -96,7 +96,8 @@ func buildPropertyValue(
 
 	case string:
 		// Based on the field type, this can be an option or just plain text.
-		if def, ok := fieldDefinitionsByName[fieldName]; ok && def.Type == model.PropertyFieldTypeRank {
+		def, ok := fieldDefinitionsByName[fieldName]
+		if ok && (def.Type == model.PropertyFieldTypeRank || def.Type == model.PropertyFieldTypeSelect) {
 			formattedValue, formatErr = formatOptionValue(fieldName, v, cache)
 		} else {
 			// Text or date

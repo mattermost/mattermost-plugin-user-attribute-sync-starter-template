@@ -170,7 +170,7 @@ func TestFormatMultiselectValue(t *testing.T) {
 	})
 }
 
-func TestFormatRankValue(t *testing.T) {
+func TestFormatOptionValue(t *testing.T) {
 	cache := testFieldIDCache()
 
 	t.Run("valid option value", func(t *testing.T) {
