@@ -22,13 +22,13 @@ func testFieldIDCache() *FieldIDCache {
 			"start_date": "test_field_id_4",
 		},
 		OptionNameToID: map[string]string{
-			"Apples":       "test_opt_id_apples",
-			"Oranges":      "test_opt_id_oranges",
-			"Lemons":       "test_opt_id_lemons",
-			"CUI":          "test_opt_id_cui",
-			"Confidential": "test_opt_id_confidential",
-			"Secret":       "test_opt_id_secret",
-			"Top Secret":   "test_opt_id_top_secret",
+			"programs|Apples":        "test_opt_id_apples",
+			"programs|Oranges":       "test_opt_id_oranges",
+			"programs|Lemons":        "test_opt_id_lemons",
+			"clearance|CUI":          "test_opt_id_cui",
+			"clearance|Confidential": "test_opt_id_confidential",
+			"clearance|Secret":       "test_opt_id_secret",
+			"clearance|Top Secret":   "test_opt_id_top_secret",
 		},
 	}
 }

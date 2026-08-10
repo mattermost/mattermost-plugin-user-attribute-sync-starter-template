@@ -80,13 +80,13 @@ func TestSyncFields(t *testing.T) {
 		assert.Equal(t, "generated_id_2", cache.GetFieldID("programs"))
 		assert.Equal(t, "generated_id_3", cache.GetFieldID("clearance"))
 		assert.Equal(t, "generated_id_4", cache.GetFieldID("start_date"))
-		assert.Equal(t, "opt_id_1", cache.GetOptionID("Apples"))
-		assert.Equal(t, "opt_id_2", cache.GetOptionID("Oranges"))
-		assert.Equal(t, "opt_id_3", cache.GetOptionID("Lemons"))
-		assert.Equal(t, "opt_id_4", cache.GetOptionID("CUI"))
-		assert.Equal(t, "opt_id_5", cache.GetOptionID("Confidential"))
-		assert.Equal(t, "opt_id_6", cache.GetOptionID("Secret"))
-		assert.Equal(t, "opt_id_7", cache.GetOptionID("Top Secret"))
+		assert.Equal(t, "opt_id_1", cache.GetOptionID("programs", "Apples"))
+		assert.Equal(t, "opt_id_2", cache.GetOptionID("programs", "Oranges"))
+		assert.Equal(t, "opt_id_3", cache.GetOptionID("programs", "Lemons"))
+		assert.Equal(t, "opt_id_4", cache.GetOptionID("clearance", "CUI"))
+		assert.Equal(t, "opt_id_5", cache.GetOptionID("clearance", "Confidential"))
+		assert.Equal(t, "opt_id_6", cache.GetOptionID("clearance", "Secret"))
+		assert.Equal(t, "opt_id_7", cache.GetOptionID("clearance", "Top Secret"))
 		api.AssertExpectations(t)
 	})
 
@@ -321,20 +321,27 @@ func TestFieldIDCache(t *testing.T) {
 	t.Run("GetOptionID returns correct option IDs", func(t *testing.T) {
 		cache := &FieldIDCache{
 			OptionNameToID: map[string]string{
-				"Apples":  "opt1",
-				"Oranges": "opt2",
-				"Lemons":  "opt3",
+				"programs|Apples":  "opt1",
+				"programs|Oranges": "opt2",
+				"programs|Lemons":  "opt3",
 			},
 		}
-		assert.Equal(t, "opt1", cache.GetOptionID("Apples"))
-		assert.Equal(t, "opt2", cache.GetOptionID("Oranges"))
-		assert.Equal(t, "opt3", cache.GetOptionID("Lemons"))
+		assert.Equal(t, "opt1", cache.GetOptionID("programs", "Apples"))
+		assert.Equal(t, "opt2", cache.GetOptionID("programs", "Oranges"))
+		assert.Equal(t, "opt3", cache.GetOptionID("programs", "Lemons"))
+	})
+
+	t.Run("GetOptionID returns empty string for unknown field", func(t *testing.T) {
+		cache := &FieldIDCache{
+			OptionNameToID: make(map[string]string),
+		}
+		assert.Equal(t, "", cache.GetOptionID("unknown", "Apples"))
 	})
 
 	t.Run("GetOptionID returns empty string for unknown option", func(t *testing.T) {
 		cache := &FieldIDCache{
 			OptionNameToID: make(map[string]string),
 		}
-		assert.Equal(t, "", cache.GetOptionID("Unknown"))
+		assert.Equal(t, "", cache.GetOptionID("programs", "Unknown"))
 	})
 }

@@ -15,6 +15,7 @@ type FieldIDCache struct {
 	// Maps external field names (e.g., "job_title") to Mattermost field IDs
 	FieldNameToID map[string]string
 	// Maps option names (e.g., "Apples") to Mattermost option IDs for all select/multiselect/rank fields
+	// Option names are prefixed with field names to avoid name collision.
 	OptionNameToID map[string]string
 }
 
@@ -24,8 +25,9 @@ func (c *FieldIDCache) GetFieldID(fieldName string) string {
 }
 
 // GetOptionID translates a select/multiselect/rank option name to its Mattermost option ID.
-func (c *FieldIDCache) GetOptionID(optionName string) string {
-	return c.OptionNameToID[optionName]
+func (c *FieldIDCache) GetOptionID(fieldName, optionName string) string {
+	// Keys are prefixes with field name to avoid option name collision
+	return c.OptionNameToID[fieldName+"|"+optionName]
 }
 
 // fieldDefinition defines a user attribute field schema.
@@ -416,9 +418,11 @@ func extractOptionIDs(
 			continue
 		}
 
+		//Prefix field name to avoid option name collision
+		optionKey := def.Name + "|" + name
 		// Avoid duplicate option names - only add if not already in cache
-		if _, exists := cache.OptionNameToID[name]; !exists {
-			cache.OptionNameToID[name] = id
+		if _, exists := cache.OptionNameToID[optionKey]; !exists {
+			cache.OptionNameToID[optionKey] = id
 		}
 	}
 

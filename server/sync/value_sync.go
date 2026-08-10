@@ -25,7 +25,7 @@ func formatMultiselectValue(fieldName string, values []string, cache *FieldIDCac
 	// Translate option names to IDs
 	optionIDs := make([]string, 0, len(values))
 	for _, optionName := range values {
-		optionID := cache.GetOptionID(optionName)
+		optionID := cache.GetOptionID(fieldName, optionName)
 		if optionID == "" {
 			return nil, fmt.Errorf("unknown option %q for field %s", optionName, fieldName)
 		}
@@ -42,7 +42,7 @@ func formatMultiselectValue(fieldName string, values []string, cache *FieldIDCac
 
 func formatOptionValue(fieldName, value string, cache *FieldIDCache) (json.RawMessage, error) {
 	// Translate option name to ID
-	optionID := cache.GetOptionID(value)
+	optionID := cache.GetOptionID(fieldName, value)
 	if optionID == "" {
 		return nil, fmt.Errorf("unknown option %q for field %s", value, fieldName)
 	}
