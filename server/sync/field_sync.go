@@ -138,6 +138,7 @@ func updateField(
 	groupID string,
 	existingField *model.PropertyField,
 	def fieldDefinition,
+	cache *FieldIDCache,
 ) (*model.PropertyField, error) {
 	client.Log.Info("Field exists, updating to match definition",
 		"field_id", existingField.ID,
@@ -155,8 +156,7 @@ func updateField(
 	existingField.PermissionOptions = &sysadmin
 
 	if def.Type.SupportsOptions() {
-		// Build options array with name only - Mattermost will generate IDs
-		options, err := buildOptionsArr(def)
+		options, err := buildOptionsArr(def, cache)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to update existing field %s", def.Name)
 		}
@@ -172,20 +172,35 @@ func updateField(
 	return updatedField, nil
 }
 
-func buildOptionsArr(def fieldDefinition) ([]interface{}, error) {
-	options := make([]interface{}, len(def.Options))
+func buildOptionsArr(def fieldDefinition, cache *FieldIDCache) ([]interface{}, error) {
+	options := make([]model.CustomProfileAttributesSelectOption, len(def.Options))
 	for i, option := range def.Options {
-		attrs := map[string]interface{}{"name": option.Name}
-		// Don't forget to add in the option's rank value for Rank fields types
-		if def.Type == model.PropertyFieldTypeRank {
-			if option.Rank == nil {
-				return nil, fmt.Errorf("encountered a missing rank for field %s", def.Name)
+		// Add in ID if it's already in the cache, otherwise Mattermost will generate a new one
+		// Don't pass in a cache if you don't need it (like when creating a new field)
+		if cache != nil {
+			id := cache.GetOptionID(def.Name, option.Name)
+			if id != "" {
+				option.ID = id
 			}
-			attrs["rank"] = *option.Rank
 		}
-		options[i] = attrs
+
+		if def.Type == model.PropertyFieldTypeRank && option.Rank == nil {
+			return nil, fmt.Errorf("Missing Rank value for option %s on field %s", option.Name, def.Name)
+		}
+		options[i] = option
 	}
-	return options, nil
+
+	raw, err := json.Marshal(options)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to marshal options for field %s", def.Name)
+	}
+
+	// The []interface{} type is a registered type in the pluginAPI's RPC call and will ensure the data gets through intact.
+	var optionsArr []interface{}
+	if err := json.Unmarshal(raw, &optionsArr); err != nil {
+		return nil, errors.Wrapf(err, "Failed to unmarshal options for field %s", def.Name)
+	}
+	return optionsArr, nil
 }
 
 // createField creates a new user attribute field from the definition.
@@ -271,8 +286,8 @@ func createField(
 
 	// Select / Multiselect / Rank fields need their options defined
 	if def.Type.SupportsOptions() {
-		// Build options array with name only - Mattermost will generate IDs
-		options, err := buildOptionsArr(def)
+		// No need to pass in a cache when creating a new field
+		options, err := buildOptionsArr(def, nil)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create field %s", def.Name)
 		}
@@ -340,8 +355,23 @@ func syncSingleField(
 				def.Name)
 		}
 
+		// The server already assigned IDs to this field's options, and the cache is
+		// empty on every activation. Load them before building the update payload so
+		// buildOptionsArr sends the existing IDs back - otherwise the server mints new
+		// ones and every stored user value is left pointing at an option that no
+		// longer exists.
+		if def.Type.SupportsOptions() && len(def.Options) > 0 {
+			if err := extractOptionIDs(client, existingField, def, cache); err != nil {
+				client.Log.Warn("Failed to read existing option IDs",
+					"name", def.Name,
+					"field_id", existingField.ID,
+					"error", err.Error())
+				// Don't fail the sync - the server will generate new option IDs
+			}
+		}
+
 		// Field exists and we own it - update it
-		field, err = updateField(client, groupID, existingField, def)
+		field, err = updateField(client, groupID, existingField, def, cache)
 		if err != nil {
 			return "", err
 		}
