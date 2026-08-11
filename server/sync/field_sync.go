@@ -131,21 +131,6 @@ func indexFieldDefinitions(defs []fieldDefinition) map[string]fieldDefinition {
 	return byName
 }
 
-// hasOptions reports whether this field type declares its allowed values as a
-// set of named options. Mattermost generates an ID for each option, which is
-// why values for these fields are written as option IDs rather than names --
-// see formatOptionValue and formatMultiselectValue.
-func (def fieldDefinition) hasOptions() bool {
-	switch def.Type {
-	case model.PropertyFieldTypeSelect,
-		model.PropertyFieldTypeMultiselect,
-		model.PropertyFieldTypeRank:
-		return true
-	default:
-		return false
-	}
-}
-
 // updateField updates an existing user attribute field to match the definition.
 // Returns the updated field.
 func updateField(
@@ -169,7 +154,7 @@ func updateField(
 	existingField.PermissionValues = &sysadmin
 	existingField.PermissionOptions = &sysadmin
 
-	if def.hasOptions() {
+	if def.Type.SupportsOptions() {
 		// Build options array with name only - Mattermost will generate IDs
 		options, err := buildOptionsArr(def)
 		if err != nil {
@@ -285,7 +270,7 @@ func createField(
 	}
 
 	// Select / Multiselect / Rank fields need their options defined
-	if def.hasOptions() {
+	if def.Type.SupportsOptions() {
 		// Build options array with name only - Mattermost will generate IDs
 		options, err := buildOptionsArr(def)
 		if err != nil {
@@ -372,7 +357,7 @@ func syncSingleField(
 	cache.FieldNameToID[def.Name] = field.ID
 
 	// For supported field types, extract option IDs
-	if def.hasOptions() && len(def.Options) > 0 {
+	if def.Type.SupportsOptions() && len(def.Options) > 0 {
 		if err := extractOptionIDs(client, field, def, cache); err != nil {
 			client.Log.Error("Failed to extract option IDs",
 				"name", def.Name,
