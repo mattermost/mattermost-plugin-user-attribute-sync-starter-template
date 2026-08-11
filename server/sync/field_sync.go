@@ -185,20 +185,20 @@ func buildOptionsArr(def fieldDefinition, cache *FieldIDCache) ([]interface{}, e
 		}
 
 		if def.Type == model.PropertyFieldTypeRank && option.Rank == nil {
-			return nil, fmt.Errorf("Missing Rank value for option %s on field %s", option.Name, def.Name)
+			return nil, fmt.Errorf("missing Rank value for option %s on field %s", option.Name, def.Name)
 		}
 		options[i] = option
 	}
 
 	raw, err := json.Marshal(options)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Failed to marshal options for field %s", def.Name)
+		return nil, errors.Wrapf(err, "failed to marshal options for field %s", def.Name)
 	}
 
 	// The []interface{} type is a registered type in the pluginAPI's RPC call and will ensure the data gets through intact.
 	var optionsArr []interface{}
 	if err := json.Unmarshal(raw, &optionsArr); err != nil {
-		return nil, errors.Wrapf(err, "Failed to unmarshal options for field %s", def.Name)
+		return nil, errors.Wrapf(err, "failed to unmarshal options for field %s", def.Name)
 	}
 	return optionsArr, nil
 }
@@ -361,7 +361,7 @@ func syncSingleField(
 		// ones and every stored user value is left pointing at an option that no
 		// longer exists.
 		if def.Type.SupportsOptions() && len(def.Options) > 0 {
-			if err := extractOptionIDs(client, existingField, def, cache); err != nil {
+			if err = extractOptionIDs(client, existingField, def, cache); err != nil {
 				client.Log.Warn("Failed to read existing option IDs",
 					"name", def.Name,
 					"field_id", existingField.ID,
@@ -433,7 +433,7 @@ func extractOptionIDs(
 			continue
 		}
 
-		//Prefix field name to avoid option name collision
+		// Prefix field name to avoid option name collision
 		optionKey := def.Name + "|" + name
 		// Avoid duplicate option names - only add if not already in cache
 		if _, exists := cache.OptionNameToID[optionKey]; !exists {
