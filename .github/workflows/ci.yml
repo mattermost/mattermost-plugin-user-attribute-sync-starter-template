@@ -1,10 +1,8 @@
 name: ci
 on:
-  schedule:
-    - cron: "0 0 * * *"
   push:
     branches:
-      - master
+      - main
     tags:
       - "v*"
   pull_request:
@@ -17,5 +15,3 @@ jobs:
   plugin-ci:
     uses: mattermost/actions-workflows/.github/workflows/plugin-ci.yml@main
     secrets: inherit
-    with:
-      golang-version: "1.24"
