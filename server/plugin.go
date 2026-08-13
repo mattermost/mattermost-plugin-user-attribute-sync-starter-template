@@ -3,6 +3,7 @@ package main
 import (
 	"sync"
 
+	"github.com/gorilla/mux"
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
@@ -17,6 +18,9 @@ type Plugin struct {
 
 	// client is the Mattermost server API client.
 	client *pluginapi.Client
+
+	// router is the HTTP router that serves API endpoints
+	router *mux.Router
 
 	// backgroundJob runs attribute sync on the configured time interval.
 	backgroundJob *cluster.Job
@@ -44,6 +48,8 @@ type Plugin struct {
 // OnActivate is invoked when the plugin is activated. If an error is returned, the plugin will be deactivated.
 func (p *Plugin) OnActivate() error {
 	p.client = pluginapi.NewClient(p.API, p.Driver)
+
+	p.initializeAPI()
 
 	// "access_control" is the property group whose fields can be referenced
 	// from attribute-based access control (ABAC) policy rules. We register
