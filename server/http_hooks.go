@@ -101,6 +101,11 @@ func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if len(userAttrs) == 0 {
+		p.errorWithJSON(w, http.StatusNotFound, "file not found")
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(userAttrs); err != nil {
 		p.API.LogError("Failed to write file in response", "err", err.Error())
