@@ -7,7 +7,7 @@ Detailed context for AI agents working on this codebase.
 A **Mattermost plugin starter template** that synchronizes user attributes from an external system into Mattermost. The synced attributes appear on user profiles in the UI and are also addressable as `user.attributes.<field_name>` from attribute-based access control (ABAC) policy rules — which is why the plugin writes into the `access_control` property group. It's a reference implementation and educational resource — designed to be read, understood, and adapted. This is not a plugin that can be used as-is as a plug-and-play solution. It is expected that a developer takes this and uses it as the foundation of their own custom plugin.
 
 **Plugin ID:** `com.mattermost.user-attribute-sync-starter-template`
-**Min Mattermost version:** 11.8.0
+**Min Mattermost version:** 11.9.0 (the `rank` field type requires it)
 **Languages:** Go 1.26.3+ (server), TypeScript/React (webapp)
 
 ## Architecture
@@ -39,7 +39,7 @@ All fields and values are stored in the `access_control` property group (`model.
 | `server/configuration.go` | Thread-safe config management with RWMutex. Settings: `SyncIntervalMinutes` (default 60). |
 | `server/sync/provider.go` | `AttributeProvider` interface: `GetUserAttributes() ([]map[string]interface{}, error)` and `Close() error`. |
 | `server/sync/field_sync.go` | Field definitions array and schema management. Creates/updates user attribute fields. Maintains `FieldIDCache` mapping external names to Mattermost-generated IDs. |
-| `server/sync/value_sync.go` | `SyncUsers()` — matches users by email, builds PropertyValue objects, bulk upserts. Handles text, date, and multiselect value types. |
+| `server/sync/value_sync.go` | `SyncUsers()` — matches users by email, builds PropertyValue objects, bulk upserts. Handles text, date, multiselect, and rank value types. |
 | `server/sync/file_provider.go` | Example `AttributeProvider` implementation. Reads JSON from Mattermost data directory. Tracks file modification time for incremental sync. |
 | `server/main.go` | Plugin entry point (minimal). |
 | `server/manifest.go` | Auto-generated from plugin.json — do not edit manually. |
@@ -67,7 +67,8 @@ Defined in `server/sync/field_sync.go` we have a few example user attribute fiel
 
 1. **Job Title** — `job_title`, Text type, Public access
 2. **Programs** — `programs`, Multiselect type, SharedOnly access, options: Apples/Oranges/Lemons/Grapes
-3. **Start Date** — `start_date`, Date type, SourceOnly access
+3. **Clearance** — `clearance`, Rank type, SharedOnly access, options: CUI(1)/Confidential(2)/Secret(3)/Top Secret(4)
+4. **Start Date** — `start_date`, Date type, SourceOnly access
 
 All fields are `protected: true` (only this plugin can modify structure and write values) and `visibility: always` (shown in UI).
 
@@ -76,7 +77,7 @@ These fields are examples, and should be adapted to the developer's use case.
 ### Access Modes
 
 - **Public**: Everyone can read all values
-- **SharedOnly**: Users only see values they share with the target (multiselect only)
+- **SharedOnly**: Users only see values they share with the target (select, multiselect, and rank only; on rank, a user sees their own rank and lower)
 - **SourceOnly**: Only this plugin can read values via API
 
 ## Data Flow
@@ -85,12 +86,22 @@ These fields are examples, and should be adapted to the developer's use case.
 2. `OnActivate()` creates a `FileProvider` and starts a `cluster.Job`
 3. On each job tick, `runSync()` calls `provider.GetUserAttributes()` → `SyncUsers()`
 4. `SyncUsers()` iterates users, looks up each by email, calls `buildPropertyValues()` to create `PropertyValue` objects, then bulk upserts via `Property.UpsertPropertyValues()`
-5. For multiselect fields, option names are translated to option IDs using `FieldIDCache`
+5. For fields with options (select, multiselect, rank), option names are translated to option IDs using `FieldIDCache`
+
+**Invariants worth knowing before changing sync code:**
+
+- `email` is the join key between external data and Mattermost users. It is consumed by `SyncUsers()` and explicitly skipped by `buildPropertyValue()`, so it is never written as an attribute. Changing the identity strategy means touching both.
+- `FieldIDCache` is built once at activation and never refreshed. External names → Mattermost-generated field IDs; option names → option IDs. A cache miss on a field name is a skip-with-warning; a cache miss on an *option* name is an error for that value.
+- Value JSON shape is type-dependent: text and date are marshaled strings; multiselect is an array of option **IDs**, not names; rank is a single option **ID** string, so a rank value looks like a text value on the wire and is only distinguishable by consulting the field definition.
+- `fieldDefinition.hasOptions()` is the single place that decides which field types carry options, and `fieldDefinitionsByName` (a package-level index of `fieldDefinitions`) is how value sync recovers a field's declared type from the external data's key. Adding an option-bearing field type means updating `hasOptions()` and the value-formatting switch in `buildPropertyValue()` together, or values will be written as raw names instead of option IDs.
+- Failure handling is per-user and per-field: unknown fields, unsupported value types, format errors, missing users, and upsert failures all log and continue. `SyncUsers()` returns `nil` unless something structural goes wrong — a "successful" sync can have written nothing.
+- Timing comes from `nextWaitInterval()`, which schedules relative to `metadata.LastFinished` (0 on first run, so activation syncs immediately) and falls back to 60 minutes if the configured interval is < 1.
+- `FileProvider` uses the *relative* path `data/user_attributes.json`, resolved against the Mattermost server process's working directory (i.e. `<mattermost>/data/user_attributes.json`) — not the plugin bundle. `make deploy` does not ship the file; it must be copied there separately. Its incremental behavior is mtime-based: unchanged file → empty slice → `runSync()` returns early.
 
 ## Extending the Plugin
 
 ### Adding a new field
-Add an entry to `fieldDefinitions` in `server/sync/field_sync.go`. Restart plugin.
+Add an entry to `fieldDefinitions` in `server/sync/field_sync.go`. Restart plugin. Select, multiselect, and rank types also need `Options` populated; on a rank field every option needs a `Rank`, which `buildOptionsArr()` enforces.
 
 ### Custom data source
 Write code to implement the `AttributeProvider` interface (two methods: `GetUserAttributes`, `Close`). Update `plugin.go` to instantiate your provider instead of `FileProvider`.
@@ -110,9 +121,28 @@ make dist               # Build and create tar.gz bundle
 make deploy             # Build + deploy to running Mattermost
 make watch              # Auto-rebuild webapp on changes
 make clean              # Remove all build artifacts
-make install-go-tools   # Install golangci-lint, gotestsum
-make logs-watch         # Tail plugin logs on running server
+make install-go-tools   # Install golangci-lint v1.64.8, gotestsum v1.7.0 into $GOBIN
+make coverage           # Go coverage profile + open HTML report
+make logs / logs-watch  # Fetch / tail plugin logs on running server (via build/pluginctl)
+make attach             # Attach delve to the running plugin process (attach-headless, detach)
+make disable / enable / reset / kill   # Plugin lifecycle on the running server
+make apply              # Regenerate manifest files from plugin.json
+make patch|minor|major  # Bump plugin.json version (also *-rc variants)
 ```
+
+**Running a single test:**
+
+```bash
+cd server && go test ./sync/ -run TestSyncUsers -v          # one Go test
+cd server && go test ./sync/ -run 'TestFileProvider_.*' -v  # pattern
+cd webapp && npx jest src/manifest.test.tsx                 # one webapp test
+```
+
+`make test`/`make check-style` first run `apply`, install Go tools, and `npm install` — going through `go test` directly is much faster for iteration.
+
+**Generated files:** `server/manifest.go` and `webapp/src/manifest.ts` are produced by `./build/bin/manifest apply` (run automatically by most Makefile targets). Edit `plugin.json`, then `make apply` — never edit the manifest files by hand. `make manifest-check` validates the manifest.
+
+**Go module path:** `github.com/mattermost/user-attribute-sync-starter-template` (internal imports use `.../server/sync`, aliased `attrsync` in `plugin.go`). Note `.golangci.yml` still carries the upstream template's `goimports.local-prefixes`, so import grouping for local packages isn't enforced.
 
 **Environment variables:**
 - `MM_DEBUG=1` — Debug build (disables optimizations)

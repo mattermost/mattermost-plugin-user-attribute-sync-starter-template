@@ -18,12 +18,17 @@ func testFieldIDCache() *FieldIDCache {
 		FieldNameToID: map[string]string{
 			"job_title":  "test_field_id_1",
 			"programs":   "test_field_id_2",
-			"start_date": "test_field_id_3",
+			"clearance":  "test_field_id_3",
+			"start_date": "test_field_id_4",
 		},
 		OptionNameToID: map[string]string{
-			"Apples":  "test_opt_id_apples",
-			"Oranges": "test_opt_id_oranges",
-			"Lemons":  "test_opt_id_lemons",
+			"programs|Apples":        "test_opt_id_apples",
+			"programs|Oranges":       "test_opt_id_oranges",
+			"programs|Lemons":        "test_opt_id_lemons",
+			"clearance|CUI":          "test_opt_id_cui",
+			"clearance|Confidential": "test_opt_id_confidential",
+			"clearance|Secret":       "test_opt_id_secret",
+			"clearance|Top Secret":   "test_opt_id_top_secret",
 		},
 	}
 }
@@ -165,6 +170,27 @@ func TestFormatMultiselectValue(t *testing.T) {
 	})
 }
 
+func TestFormatOptionValue(t *testing.T) {
+	cache := testFieldIDCache()
+
+	t.Run("valid option value", func(t *testing.T) {
+		result, err := formatOptionValue("clearance", "Confidential", cache)
+		require.NoError(t, err)
+
+		var decoded string
+		err = json.Unmarshal(result, &decoded)
+		require.NoError(t, err)
+		assert.Equal(t, "test_opt_id_confidential", decoded)
+	})
+
+	t.Run("unknown option returns error", func(t *testing.T) {
+		_, err := formatOptionValue("clearance", "Value2", cache)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown option")
+		assert.Contains(t, err.Error(), "Value2")
+	})
+}
+
 func TestBuildPropertyValues(t *testing.T) {
 	groupID := "test-group-id"
 	user := &model.User{
@@ -182,11 +208,12 @@ func TestBuildPropertyValues(t *testing.T) {
 			"job_title":  "Software Engineer",
 			"start_date": "2023-01-15",
 			"programs":   []interface{}{"Apples", "Oranges"},
+			"clearance":  "Top Secret",
 		}
 
 		values, err := buildPropertyValues(client, user, groupID, userAttrs, cache)
 		require.NoError(t, err)
-		assert.Len(t, values, 3) // email excluded
+		assert.Len(t, values, 4) // email excluded
 
 		// Verify all values have correct structure
 		for _, v := range values {
@@ -216,6 +243,25 @@ func TestBuildPropertyValues(t *testing.T) {
 		err = json.Unmarshal(values[0].Value, &optionIDs)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"test_opt_id_apples", "test_opt_id_lemons"}, optionIDs)
+	})
+
+	t.Run("looks up option_ids for rank fields", func(t *testing.T) {
+		api := &plugintest.API{}
+		client := pluginapi.NewClient(api, &plugintest.Driver{})
+
+		userAttrs := map[string]interface{}{
+			"email":     "test@example.com",
+			"clearance": "CUI",
+		}
+
+		values, err := buildPropertyValues(client, user, groupID, userAttrs, cache)
+		require.NoError(t, err)
+		assert.Len(t, values, 1)
+
+		var optionID string
+		err = json.Unmarshal(values[0].Value, &optionID)
+		require.NoError(t, err)
+		assert.Equal(t, "test_opt_id_cui", optionID)
 	})
 
 	t.Run("skips email field", func(t *testing.T) {
@@ -308,11 +354,13 @@ func TestSyncUsers(t *testing.T) {
 				"email":     "user1@example.com",
 				"job_title": "Software Engineer",
 				"programs":  []interface{}{"Apples"},
+				"clearance": "Top Secret",
 			},
 			{
 				"email":     "user2@example.com",
 				"job_title": "Sales Manager",
 				"programs":  []interface{}{"Lemons"},
+				"clearance": "CUI",
 			},
 		}
 

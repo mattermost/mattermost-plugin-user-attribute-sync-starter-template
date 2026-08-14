@@ -25,7 +25,7 @@ func formatMultiselectValue(fieldName string, values []string, cache *FieldIDCac
 	// Translate option names to IDs
 	optionIDs := make([]string, 0, len(values))
 	for _, optionName := range values {
-		optionID := cache.GetOptionID(optionName)
+		optionID := cache.GetOptionID(fieldName, optionName)
 		if optionID == "" {
 			return nil, fmt.Errorf("unknown option %q for field %s", optionName, fieldName)
 		}
@@ -38,6 +38,16 @@ func formatMultiselectValue(fieldName string, values []string, cache *FieldIDCac
 	}
 
 	return json.RawMessage(marshaled), nil
+}
+
+func formatOptionValue(fieldName, value string, cache *FieldIDCache) (json.RawMessage, error) {
+	// Translate option name to ID
+	optionID := cache.GetOptionID(fieldName, value)
+	if optionID == "" {
+		return nil, fmt.Errorf("unknown option %q for field %s", value, fieldName)
+	}
+
+	return formatStringValue(optionID)
 }
 
 // buildPropertyValue creates a single PropertyValue for a user attribute.
@@ -85,8 +95,14 @@ func buildPropertyValue(
 		formattedValue, formatErr = formatMultiselectValue(fieldName, v, cache)
 
 	case string:
-		// Text or date
-		formattedValue, formatErr = formatStringValue(v)
+		// Based on the field type, this can be an option or just plain text.
+		def, ok := fieldDefinitionsByName[fieldName]
+		if ok && (def.Type == model.PropertyFieldTypeRank || def.Type == model.PropertyFieldTypeSelect) {
+			formattedValue, formatErr = formatOptionValue(fieldName, v, cache)
+		} else {
+			// Text or date
+			formattedValue, formatErr = formatStringValue(v)
+		}
 
 	default:
 		api.Log.Warn("Unsupported field value type, skipping field",
@@ -106,7 +122,7 @@ func buildPropertyValue(
 
 	propertyValue := &model.PropertyValue{
 		GroupID:    groupID,
-		TargetType: "user",
+		TargetType: model.PropertyValueTargetTypeUser,
 		TargetID:   user.Id,
 		FieldID:    fieldID,
 		Value:      formattedValue,

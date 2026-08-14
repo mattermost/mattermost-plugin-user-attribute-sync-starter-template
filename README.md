@@ -6,11 +6,11 @@ A Mattermost plugin starter template that demonstrates how to synchronize user a
 
 ## What This Template Demonstrates
 
-Mattermost's property system lets you store structured per-user metadata. A **field** defines the schema (name, type, options), while a **value** stores the actual data for a specific user. For multiselect fields, **options** define the allowed choices. Fields written into the `access_control` group also become available as `user.attributes.<field_name>` inside ABAC policy expressions.
+Mattermost's property system lets you store structured per-user metadata. A **field** defines the schema (name, type, options), while a **value** stores the actual data for a specific user. For select, multiselect, and rank fields, **options** define the allowed choices. Fields written into the `access_control` group also become available as `user.attributes.<field_name>` inside ABAC policy expressions.
 
-This plugin shows how to create fields with hardcoded definitions and synchronize values from external data sources. Fields are defined explicitly in code with their types (text, date, multiselect), and the plugin uses Mattermost's cluster job system to run periodic synchronization tasks. The implementation includes incremental synchronization that processes only changed data after the initial sync.
+This plugin shows how to create fields with hardcoded definitions and synchronize values from external data sources. Fields are defined explicitly in code with their types (text, date, multiselect, rank), and the plugin uses Mattermost's cluster job system to run periodic synchronization tasks. The implementation includes incremental synchronization that processes only changed data after the initial sync.
 
-The template creates three example user attribute fields that demonstrate different access control modes: Job Title (text, public access), Programs (multiselect with options, shared-only access), and Start Date (date, source-only access). All fields are marked as visible in the UI and protected (only this plugin can modify structure and write values).
+The template creates four example user attribute fields that demonstrate the different access control modes and value types: Job Title (text, public access), Programs (multiselect with options, shared-only access), Clearance (rank with ordered options, shared-only access), and Start Date (date, source-only access). All fields are marked as visible in the UI and protected (only this plugin can modify structure and write values).
 
 ## Architecture Overview
 
@@ -35,7 +35,7 @@ Background Job (On timed interval)
 
 ### Prerequisites
 
-- Mattermost server 11.8.0 or later
+- Mattermost server 11.9.0 or later
 - Go 1.26.3 or later (matches the version Mattermost server pins)
 - Node v16 and npm v8 (if modifying webapp)
 
@@ -66,7 +66,7 @@ Background Job (On timed interval)
 
 ## What to Expect
 
-When the plugin activates, it creates the three user attribute fields (Job Title, Programs, and Start Date) in Mattermost. These fields appear in System Console → User Attributes. If the fields already exist from a previous activation, the plugin updates them to match the hardcoded definitions.
+When the plugin activates, it creates the four user attribute fields (Job Title, Programs, Clearance, and Start Date) in Mattermost. These fields appear in System Console → User Attributes. If the fields already exist from a previous activation, the plugin updates them to match the hardcoded definitions.
 
 Immediately after activation, the plugin runs its first synchronization. It reads the `user_attributes.json` file from the Mattermost data directory, matches users by email address, and populates the user attribute values for each user found in the data file. The plugin logs its progress and any errors (such as users not found in Mattermost) during this process.
 
@@ -76,7 +76,7 @@ The synced user attribute values can be viewed in System Console → User Attrib
 
 ## Access Control
 
-This template demonstrates Mattermost's field-level access control system through three example fields, each using a different access mode.
+This template demonstrates Mattermost's field-level access control system through its example fields, covering each of the three access modes.
 
 ### Access Modes
 
@@ -84,11 +84,11 @@ This template demonstrates Mattermost's field-level access control system throug
 
 **Source-Only Access** (Start Date example): Only this plugin can read field values via API. Other users, admins, and integrations see empty options and no values. Useful for data that must be synchronized but should remain private, like employee start dates or internal identifiers. Even users cannot see their own values through the API.
 
-**Shared-Only Access** (Programs example): Users can only see field options and values they share with the target user. Only works with select and multiselect field types. Example: If Alice is in [Apples, Bananas] and Bob is in [Bananas, Oranges], Alice viewing Bob's profile only sees [Bananas] as their common program. Best for private categorical data where users should only discover shared attributes.
+**Shared-Only Access** (Programs and Clearance examples): Users can only see field options and values they share with the target user. Only works with select, multiselect, and rank field types. Example: If Alice is in [Apples, Bananas] and Bob is in [Bananas, Oranges], Alice viewing Bob's profile only sees [Bananas] as their common program. On a rank field, a user sees their own rank and lower. Best for private categorical data where users should only discover shared attributes.
 
 ### Protected Fields
 
-All three example fields are marked as "protected", which means only this plugin can modify field structure (add/remove options, change types) and write values. Users and admins cannot manually edit protected fields. Read access is controlled separately by the access mode.
+All of the example fields are marked as "protected", which means only this plugin can modify field structure (add/remove options, change types) and write values. Users and admins cannot manually edit protected fields. Read access is controlled separately by the access mode.
 
 ### UI Visibility vs Data Access
 
@@ -103,8 +103,9 @@ Consider your data sensitivity and use case:
 | Public organizational info | Public | Job Title, Department, Office Location, Phone Extension |
 | Sensitive internal data | Source-Only | Start Date, Salary Band, Performance Rating, Employee ID |
 | Private categorical membership | Shared-Only | Programs, Projects, Teams, Certifications, Skills |
+| Private ordered levels | Shared-Only | Clearance, Seniority Tier, Support Plan |
 
-**Note**: Source-only and shared-only modes require the field to be marked as protected. Shared-only mode can only be used with select or multiselect field types.
+**Note**: Source-only and shared-only modes require the field to be marked as protected. Shared-only mode can only be used with select, multiselect, or rank field types.
 
 ## Customization Guide
 
@@ -114,29 +115,60 @@ Edit `server/sync/field_sync.go` and add entries to the `fieldDefinitions` array
 
 ```go
 {
-    Name:         "Department",
-    ExternalName: "department",
-    Type:         model.PropertyFieldTypeText,
-    AccessMode:   model.PropertyAccessModePublic, // Choose: Public, SourceOnly, or SharedOnly
+    Name:        "department",
+    DisplayName: "Department",
+    Type:        model.PropertyFieldTypeText,
+    AccessMode:  model.PropertyAccessModePublic, // Choose: Public, SourceOnly, or SharedOnly
 },
 ```
+
+`Name` is the canonical identifier: it is the key looked up in the external data, and it is what ABAC policies reference as `user.attributes.<name>`, so it must be a valid CEL identifier (no spaces or punctuation). `DisplayName` is the free-form label shown in the UI.
 
 Restart the plugin to create the new field. See the Access Control section above for details on access modes.
 
-### Changing Multiselect Options
+### Changing Select or Multiselect Options
 
-Update the `OptionNames` array in `fieldDefinitions`:
+Update the `Options` array in `fieldDefinitions`:
 
 ```go
 {
-    Name:         "Programs",
-    ExternalName: "programs",
-    Type:         model.PropertyFieldTypeMultiselect,
-    OptionNames:  []string{"Apples", "Oranges", "Lemons", "Bananas"},
+    Name:        "programs",
+    DisplayName: "Programs",
+    Type:        model.PropertyFieldTypeMultiselect,
+    Options: []model.CustomProfileAttributesSelectOption{
+        {Name: "Apples"},
+        {Name: "Oranges"},
+        {Name: "Lemons"},
+        {Name: "Bananas"},
+    },
 },
 ```
 
+Mattermost generates an ID for each option, and values are stored as those IDs rather than names — the plugin reads the generated IDs back into its `FieldIDCache` and translates names to IDs when writing values.
+
 Restart the plugin to add new options. This template plugin never removes existing options from Mattermost because users may have already selected those values.
+
+### Adding a Rank Field
+
+A rank field works like a select field — a user holds exactly one option — except each option also carries an integer `Rank` that defines the ordering:
+
+```go
+{
+    Name:        "clearance",
+    DisplayName: "Clearance",
+    Type:        model.PropertyFieldTypeRank,
+    Options: []model.CustomProfileAttributesSelectOption{
+        {Name: "CUI", Rank: model.NewPointer(1)},
+        {Name: "Confidential", Rank: model.NewPointer(2)},
+        {Name: "Secret", Rank: model.NewPointer(3)},
+        {Name: "Top Secret", Rank: model.NewPointer(4)},
+    },
+},
+```
+
+That ordering is what lets an ABAC policy express a threshold with `is at least` instead of enumerating every qualifying option — for example `user.attributes.clearance >= "Secret"` matches both Secret and Top Secret.
+
+Every option on a rank field must have a `Rank`, since the ranks are what establish the ordering; the plugin refuses to create or update the field otherwise.
 
 ### Changing Sync Interval
 
