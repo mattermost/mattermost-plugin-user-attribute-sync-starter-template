@@ -31,6 +31,23 @@
                 "placeholder": "60"
             },
             {
+                "key": "AttributeProvider",
+                "display_name": "User Attribute Source",
+                "type": "radio",
+                "help_text": "Where to pull in user attributes - from local filesystem or direct upload",
+                "default": "FileProvider",
+                "options": [
+                    {
+                        "display_name": "Local Filesystem",
+                        "value": "FileProvider"
+                    },
+                    {
+                        "display_name": "Direct Upload",
+                        "value": "KVStore"
+                    }
+                ]
+            },
+            {
                 "key": "UploadUserAttributes",
                 "display_name": "Upload User Attribute",
                 "type": "custom",

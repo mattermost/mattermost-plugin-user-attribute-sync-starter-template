@@ -25,8 +25,9 @@ type Plugin struct {
 	// backgroundJob runs attribute sync on the configured time interval.
 	backgroundJob *cluster.Job
 
-	// fileProvider provides an example of syncing user attribute data from external source.
-	fileProvider attrsync.AttributeProvider
+	// attributeProvider provides an example of syncing user attribute data from external source.
+	// there are two example provided in this repo: FileProvider and KVStoreProvider
+	attributeProvider attrsync.AttributeProvider
 
 	// groupID is the ID of the Mattermost property group this plugin reads and writes.
 	// We use the "access_control" group because user attribute fields defined here can be
@@ -73,7 +74,8 @@ func (p *Plugin) OnActivate() error {
 	p.client.Log.Info("Field sync completed successfully")
 
 	// Initialize the file provider
-	p.fileProvider = attrsync.NewFileProvider()
+	// Note:  p.client must be initialized prior to this call
+	p.attributeProvider = p.NewAttributeProvider()
 
 	// Set up the attribute sync cluster job
 	// This job runs periodically to synchronize user attribute values from external
@@ -102,8 +104,8 @@ func (p *Plugin) OnDeactivate() error {
 			p.API.LogError("Failed to close attribute sync job", "err", err)
 		}
 	}
-	if p.fileProvider != nil {
-		if err := p.fileProvider.Close(); err != nil {
+	if p.attributeProvider != nil {
+		if err := p.attributeProvider.Close(); err != nil {
 			p.API.LogError("Failed to close file provider", "err", err)
 		}
 	}

@@ -50,7 +50,7 @@ func (p *Plugin) runSync() {
 	p.client.Log.Info("Sync starting")
 
 	// Fetch changed users since last sync
-	users, err := p.fileProvider.GetUserAttributes()
+	users, err := p.attributeProvider.GetUserAttributes()
 	if err != nil {
 		p.client.Log.Error("Failed to fetch changed users", "error", err.Error())
 		return

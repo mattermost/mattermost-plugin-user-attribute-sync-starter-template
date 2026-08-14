@@ -10,11 +10,11 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
+	"github.com/mattermost/user-attribute-sync-starter-template/server/sync"
 )
 
 const (
-	maxFileSizeBytes  = 10 * 1024 * 1024
-	userAttrsStoreKey = "user-attrs-file"
+	maxFileSizeBytes = 10 * 1024 * 1024
 )
 
 func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Request) {
@@ -65,7 +65,7 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Store in KV
-	set, err := p.client.KV.Set(userAttrsStoreKey, raw)
+	set, err := p.client.KV.Set(sync.UserAttrsStoreKey, raw)
 	if err != nil {
 		p.client.Log.Error("failed to upload userAttrs file", "err", err)
 		p.errorWithJSON(w, http.StatusInternalServerError, "failed to upload file")
@@ -95,7 +95,7 @@ func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Req
 	}
 
 	var userAttrs []byte
-	if err := p.client.KV.Get(userAttrsStoreKey, &userAttrs); err != nil {
+	if err := p.client.KV.Get(sync.UserAttrsStoreKey, &userAttrs); err != nil {
 		p.client.Log.Error("failed to retrieve userAttrs", "err", err)
 		p.errorWithJSON(w, http.StatusInternalServerError, "failed to download file")
 		return

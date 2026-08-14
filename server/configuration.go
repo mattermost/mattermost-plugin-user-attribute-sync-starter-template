@@ -3,7 +3,13 @@ package main
 import (
 	"reflect"
 
+	"github.com/mattermost/user-attribute-sync-starter-template/server/sync"
 	"github.com/pkg/errors"
+)
+
+const (
+	ConfigAttributeProviderFile    = "FileProvider"
+	ConfigAttributeProviderKVStore = "KVStore"
 )
 
 // configuration captures the plugin's external configuration as exposed in the Mattermost server
@@ -17,10 +23,12 @@ import (
 //
 // If you add non-reference types to your configuration struct, be sure to rewrite Clone as a deep
 // copy appropriate for your types.
+
 type configuration struct {
 	// SyncIntervalMinutes determines how often (in minutes) the plugin syncs user attributes
 	// from the external source. Must be at least 1 minute.
 	SyncIntervalMinutes int
+	AttributeProvider   string
 }
 
 // Clone shallow copies the configuration. Your implementation may require a deep copy if
@@ -69,6 +77,22 @@ func (p *Plugin) setConfiguration(configuration *configuration) {
 	}
 
 	p.configuration = configuration
+	p.attributeProvider = p.NewAttributeProvider()
+}
+
+func (p *Plugin) NewAttributeProvider() sync.AttributeProvider {
+	if p.attributeProvider != nil {
+		p.attributeProvider.Close()
+	}
+
+	switch p.configuration.AttributeProvider {
+	case ConfigAttributeProviderFile:
+		return sync.NewFileProvider()
+	case ConfigAttributeProviderKVStore:
+		return sync.NewKVStoreProvider(p.client)
+	default:
+		panic("unrecognized Attribute Provider")
+	}
 }
 
 // OnConfigurationChange is invoked when configuration changes may have been made.
