@@ -6,7 +6,7 @@ import type {Store, Action} from 'redux';
 
 import type {GlobalState} from '@mattermost/types/store';
 
-import UploadUserAttributes from 'components/upload_user_attributes';
+import AttributeProvider from 'components/attribute_provider';
 
 import type {PluginRegistry} from 'types/mattermost-webapp';
 
@@ -15,7 +15,7 @@ export default class Plugin {
     public async initialize(registry: PluginRegistry, store: Store<GlobalState, Action<Record<string, unknown>>>) {
         // @see https://developers.mattermost.com/extend/plugins/webapp/reference/
 
-        registry.registerAdminConsoleCustomSetting('UploadUserAttributes', UploadUserAttributes, {showTitle: true});
+        registry.registerAdminConsoleCustomSetting('AttributeProvider', AttributeProvider, {showTitle: true});
     }
 }
 

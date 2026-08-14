@@ -11,23 +11,56 @@ type Props = {
     setByEnv?: boolean;
 };
 
+type UserFile = {
+    file: File;
+    recordCount: number;
+}
+
+const MAX_FILE_BYES = 10 * 1024 * 1024;
+
 export default function UploadUserAttributes({id, disabled = false, setByEnv = false}: Props) {
-    const [file, setFile] = useState<File | null>(null);
+    const [pendingFile, setPendingFile] = useState<UserFile | null>(null);
     const [status, setStatus] = useState<'idle' | 'downloading' | 'uploading'>('idle');
     const [error, setError] = useState<string | null>(null);
 
     const inputRef = useRef<HTMLInputElement>(null);
 
     const isDisabled = disabled || setByEnv;
-    const canUpload = Boolean(file) && status === 'idle' && !isDisabled;
+    const canUpload = pendingFile !== null && status === 'idle' && !isDisabled;
     const canDownload = status === 'idle' && !isDisabled;
 
-    function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-        setFile(e.target.files?.[0] ?? null);
+    async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+        const newFile = e.target.files?.[0] ?? null;
+        setError(null);
+        setPendingFile(null);
+
+        if (!newFile) {
+            return;
+        }
+
+        try {
+            if (newFile.size > MAX_FILE_BYES) {
+                throw new Error('File exceeds the 10 MB limit');
+            }
+            const text = await newFile.text();
+
+            const parsed: unknown = JSON.parse(text);
+            if (!Array.isArray(parsed) ||
+                parsed.some((r) => typeof r !== 'object' || r === null || Array.isArray(r))) {
+                throw new Error('File must be a JSON array of objects');
+            }
+
+            setPendingFile({file: newFile, recordCount: parsed.length});
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Could not read file');
+            if (inputRef.current) {
+                inputRef.current.value = '';
+            }
+        }
     }
 
     async function handleUpload() {
-        if (!file) {
+        if (pendingFile === null) {
             return;
         }
 
@@ -37,7 +70,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
         try {
             const response = await fetch(
                 `/plugins/${manifest.id}/user_attributes`,
-                Client4.getOptions({method: 'POST', body: file}), //getOptions() provides CSRF Token for POST
+                Client4.getOptions({method: 'POST', body: pendingFile.file}), //getOptions() provides CSRF Token for POST
             );
 
             if (!response.ok) {
@@ -45,7 +78,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                 throw new Error(body.error ?? `Upload failed (${response.status})`);
             }
 
-            setFile(null);
+            setPendingFile(null);
             if (inputRef.current) {
                 inputRef.current.value = '';
             }
@@ -97,14 +130,20 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                     disabled={isDisabled}
                     onChange={handleFileChange}
                 />
-                <span>{file?.name ?? 'No file chosen'}</span>
+                {pendingFile && (
+                    <span>
+                        {`${pendingFile.file.name} - ${pendingFile.recordCount} users - ${Math.round(pendingFile.file.size / 1024)} KB`}
+                    </span>
+                )}
                 <button
                     type='button'
+                    className='btn btn-tertiary'
                     disabled={!canUpload}
                     onClick={handleUpload}
                 >{status === 'uploading' ? 'Uploading...' : 'Upload'}</button>
                 <button
                     type='button'
+                    className='btn btn-tertiary'
                     disabled={!canDownload}
                     onClick={handleDownload}
                 >{status === 'downloading' ? 'Downloading...' : 'Download'}</button>

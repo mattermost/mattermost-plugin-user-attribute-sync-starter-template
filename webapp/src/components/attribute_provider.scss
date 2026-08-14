@@ -1,0 +1,10 @@
+.AttrProvider__container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.RadioSetting__label,
+.RadioSetting__text {
+    margin-top: 0;
+}
