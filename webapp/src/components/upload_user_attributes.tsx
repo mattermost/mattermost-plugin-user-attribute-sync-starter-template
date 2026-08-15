@@ -1,5 +1,5 @@
 import manifest from 'manifest';
-import React, {useRef, useState} from 'react';
+import React, {useRef, useState, useEffect} from 'react';
 import type {ChangeEvent} from 'react';
 
 import {Client4} from 'mattermost-redux/client';
@@ -20,14 +20,16 @@ const MAX_FILE_BYES = 10 * 1024 * 1024;
 
 export default function UploadUserAttributes({id, disabled = false, setByEnv = false}: Props) {
     const [pendingFile, setPendingFile] = useState<UserFile | null>(null);
-    const [status, setStatus] = useState<'idle' | 'downloading' | 'uploading'>('idle');
+    const [serverHasFile, setServerHasFile] = useState<boolean | null>(null);
+    const [status, setStatus] = useState<'idle' | 'downloading' | 'uploading' | 'deleting'>('idle');
     const [error, setError] = useState<string | null>(null);
 
     const inputRef = useRef<HTMLInputElement>(null);
 
     const isDisabled = disabled || setByEnv;
     const canUpload = pendingFile !== null && status === 'idle' && !isDisabled;
-    const canDownload = status === 'idle' && !isDisabled;
+    const canDownload = serverHasFile && status === 'idle' && !isDisabled;
+    const canDelete = serverHasFile && status === 'idle' && !isDisabled;
 
     async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
         const newFile = e.target.files?.[0] ?? null;
@@ -78,6 +80,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                 throw new Error(body.error ?? `Upload failed (${response.status})`);
             }
 
+            setServerHasFile(true);
             setPendingFile(null);
             if (inputRef.current) {
                 inputRef.current.value = '';
@@ -113,41 +116,96 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
             setStatus('idle');
         }
     }
+
+    async function handleDelete() {
+        setStatus('deleting');
+        setError(null);
+
+        try {
+            const response = await fetch(
+                `plugins/${manifest.id}/user_attributes`,
+                Client4.getOptions({method: 'DELETE'}),
+            );
+
+            if (!response.ok) {
+                throw new Error(`Delete failed (${response.status})`);
+            }
+
+            setServerHasFile(false);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Delete failed');
+        } finally {
+            setStatus('idle');
+        }
+    }
+
+    async function checkServerFileStatus() {
+        const response = await fetch(`/plugins/${manifest.id}/user_attributes/exists`);
+        if (response.ok) {
+            const body = await response.json();
+            setServerHasFile(Boolean(body.exists));
+        }
+    }
+
+    useEffect(() => {
+        checkServerFileStatus();
+    }, []);
+
     return (
-        <div id={id}>
-            <div className='UserAttrSync__row'>
-                <button
-                    type='button'
-                    className='btn btn-tertiary'
-                    disabled={isDisabled}
-                    onClick={() => inputRef.current?.click()}
-                >{'Choose File'}</button>
-                <input
-                    ref={inputRef}
-                    type='file'
-                    accept='.json'
-                    style={{display: 'none'}}
-                    disabled={isDisabled}
-                    onChange={handleFileChange}
-                />
-                {pendingFile && (
-                    <span>
-                        {`${pendingFile.file.name} - ${pendingFile.recordCount} users - ${Math.round(pendingFile.file.size / 1024)} KB`}
-                    </span>
-                )}
-                <button
-                    type='button'
-                    className='btn btn-tertiary'
-                    disabled={!canUpload}
-                    onClick={handleUpload}
-                >{status === 'uploading' ? 'Uploading...' : 'Upload'}</button>
-                <button
-                    type='button'
-                    className='btn btn-tertiary'
-                    disabled={!canDownload}
-                    onClick={handleDownload}
-                >{status === 'downloading' ? 'Downloading...' : 'Download'}</button>
-            </div>
+        <div
+            id={id}
+            className='UserAttrSync'
+        >
+            <section className='UserAttrSync__section'>
+                <h5 className='UserAttrSync__heading'>{'Current file'}</h5>
+                <div className='UserAttrSync__row'>
+                    <span>{serverHasFile ? 'File detected' : 'No file on server'}</span>
+                    <button
+                        type='button'
+                        className='btn btn-tertiary'
+                        disabled={!canDownload}
+                        onClick={handleDownload}
+                    >{status === 'downloading' ? 'Downloading...' : 'Download'}</button>
+                    <button
+                        type='button'
+                        className='btn btn-tertiary btn-danger'
+                        disabled={!canDelete}
+                        onClick={handleDelete}
+                    >{status === 'deleting' ? 'Deleting...' : 'Delete'}</button>
+                </div>
+            </section>
+
+            <section className='UserAttrSync__section'>
+                <h5 className='UserAttrSync__heading'>{'Upload new file'}</h5>
+                <div className='UserAttrSync__row'>
+                    <button
+                        type='button'
+                        className='btn btn-tertiary'
+                        disabled={isDisabled}
+                        onClick={() => inputRef.current?.click()}
+                    >{'Choose File'}</button>
+                    <input
+                        ref={inputRef}
+                        type='file'
+                        accept='.json'
+                        style={{display: 'none'}}
+                        disabled={isDisabled}
+                        onChange={handleFileChange}
+                    />
+                    <button
+                        type='button'
+                        className='btn btn-tertiary'
+                        disabled={!canUpload}
+                        onClick={handleUpload}
+                    >{status === 'uploading' ? 'Uploading...' : 'Upload'}</button>
+                    {pendingFile && (
+                        <span>
+                            {`${pendingFile.file.name} - ${pendingFile.recordCount} users - ${Math.round(pendingFile.file.size / 1024)} KB`}
+                        </span>
+                    )}
+                </div>
+            </section>
+
             {error && <div className='error-text'>{error}</div>}
         </div>
     );

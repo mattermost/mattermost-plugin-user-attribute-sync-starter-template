@@ -24,8 +24,12 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 func (p *Plugin) initializeAPI() {
 	router := mux.NewRouter()
 
+	// These endpoints are to allow an admin to upload a file directly through the System Console
+	// rather than manually installing a file on the filesystem
 	router.HandleFunc("/user_attributes", p.handleUploadUserAttributes).Methods("POST")
 	router.HandleFunc("/user_attributes", p.handleDownloadUserAttributes).Methods("GET")
+	router.HandleFunc("/user_attributes/exists", p.handleUserAttributesExist).Methods("GET")
+	router.HandleFunc("/user_attributes", p.handleDeleteUserAttributes).Methods("DELETE")
 
 	p.router = router
 }
@@ -112,6 +116,52 @@ func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Req
 		p.errorWithJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+}
+
+func (p *Plugin) handleUserAttributesExist(w http.ResponseWriter, r *http.Request) {
+	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		p.errorWithJSON(w, http.StatusUnauthorized, "log in")
+		return
+	}
+
+	// Access is locked down to a sysadmin
+	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
+		p.errorWithJSON(w, http.StatusForbidden, "not authorized")
+		return
+	}
+
+	var userAttrs []byte
+	if err := p.client.KV.Get(sync.UserAttrsStoreKey, &userAttrs); err != nil {
+		p.client.Log.Error("failed to retrieve userAttrs", "err", err)
+		p.errorWithJSON(w, http.StatusInternalServerError, "failed to access storage")
+		return
+	}
+
+	p.responseWithJSON(w, http.StatusOK, map[string]bool{"exists": len(userAttrs) > 0})
+}
+
+func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Request) {
+	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		p.errorWithJSON(w, http.StatusUnauthorized, "log in")
+		return
+	}
+
+	// Access is locked down to a sysadmin
+	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
+		p.errorWithJSON(w, http.StatusForbidden, "not authorized")
+		return
+	}
+
+	if err := p.client.KV.Delete(sync.UserAttrsStoreKey); err != nil {
+		p.errorWithJSON(w, http.StatusForbidden, "failed to delete file")
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (p *Plugin) errorWithJSON(w http.ResponseWriter, responseCode int, errMessage string) {

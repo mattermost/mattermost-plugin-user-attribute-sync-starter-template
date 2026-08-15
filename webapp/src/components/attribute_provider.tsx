@@ -41,6 +41,9 @@ export default function AttributeProvider({id, value, onChange, disabled, setByE
                 />
                 <span className='RadioSetting__text'>{'Direct Upload'}</span>
             </label>
+            {value === 'FileProvider' &&
+            <p>{'Save file on Mattermost Server as data/user_attributes.json'}</p>
+            }
             {value === 'KVStore' &&
             <UploadUserAttributes
                 id={id}
