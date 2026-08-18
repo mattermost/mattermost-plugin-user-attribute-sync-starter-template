@@ -44,7 +44,20 @@ export default class PluginSettingsPage {
     }
 
     deleteButton() {
-        return this.page.getByRole('button', {name: 'Delete'});
+        return this.page.locator('.UserAttrSync').getByRole('button', {name: 'Delete'});
+    }
+
+    // Need to use a CSS id here since getByRole will
+    confirmDeleteDialog() {
+        return this.page.getByRole('dialog', {name: 'Delete stored user attributes file?'});
+    }
+
+    confirmDeleteButton() {
+        return this.confirmDeleteDialog().getByRole('button', {name: 'Delete'});
+    }
+
+    cancelDeleteButton() {
+        return this.confirmDeleteDialog().getByRole('button', {name: "Cancel"});
     }
 
     saveButton() {
@@ -83,6 +96,11 @@ export default class PluginSettingsPage {
     async chooseAndUpload(filePath: string) {
         await this.chooseFile(filePath);
         await this.uploadButton().click();
+    }
+
+    async deleteWithConfirm() {
+        await this.deleteButton().click();
+        await this.confirmDeleteButton().click();
     }
 
     // --- assertions --------------------------------------------------------

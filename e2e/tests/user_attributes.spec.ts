@@ -97,9 +97,26 @@ test.describe('user attributes upload and download', () => {
         await settings.goto();
         await settings.expectFileOnServer();
 
-        await settings.deleteButton().click();
+        await settings.deleteWithConfirm();
 
         await settings.expectNoFileOnServer();
         await expect(settings.downloadButton()).toBeDisabled();
+    });
+
+     test('keeps the stored file when the delete modal is dismissed', async ({page}) => {
+        const admin = await adminAPIContext();
+        await apiUploadStoredAttributes(admin, validAttributesFile);
+        await admin.dispose();
+
+        const settings = new PluginSettingsPage(page);
+        await settings.goto();
+        await settings.expectFileOnServer();
+
+        await settings.deleteButton().click();
+        await settings.cancelDeleteButton().click();
+
+        await expect(settings.confirmDeleteDialog()).toBeHidden()
+        await settings.expectFileOnServer();
+        await expect(settings.downloadButton()).toBeEnabled();
     });
 });

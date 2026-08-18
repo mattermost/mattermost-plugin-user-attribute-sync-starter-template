@@ -4,6 +4,8 @@ import type {ChangeEvent} from 'react';
 
 import {Client4} from 'mattermost-redux/client';
 import './upload_user_attributes.scss';
+import './confirm_modal';
+import ConfirmModal from './confirm_modal';
 
 type Props = {
     id: string;
@@ -23,6 +25,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
     const [serverHasFile, setServerHasFile] = useState<boolean | null>(null);
     const [status, setStatus] = useState<'idle' | 'downloading' | 'uploading' | 'deleting'>('idle');
     const [error, setError] = useState<string | null>(null);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -118,6 +121,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
     }
 
     async function handleDelete() {
+        setShowDeleteConfirm(false);
         setStatus('deleting');
         setError(null);
 
@@ -170,7 +174,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                         type='button'
                         className='btn btn-tertiary btn-danger'
                         disabled={!canDelete}
-                        onClick={handleDelete}
+                        onClick={() => setShowDeleteConfirm(true)}
                     >{status === 'deleting' ? 'Deleting...' : 'Delete'}</button>
                 </div>
             </section>
@@ -208,6 +212,16 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
             </section>
 
             {error && <div className='error-text'>{error}</div>}
+
+            <ConfirmModal
+                show={showDeleteConfirm}
+                title={'Delete stored user attributes file?'}
+                message={'The uploaded file will be removed from the server and the plugin will have nothing to sync. Attribute values already written to user profiles will remain. This cannot be undone.'}
+                confirmButtonText={'Delete'}
+                isConfirmDisabled={isDisabled}
+                onConfirm={handleDelete}
+                onCancel={() => setShowDeleteConfirm(false)}
+            />
         </div>
     );
 }
