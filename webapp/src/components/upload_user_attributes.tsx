@@ -186,6 +186,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                     >{'Choose File'}</button>
                     <input
                         ref={inputRef}
+                        data-testid='userAttrSyncFileInput'
                         type='file'
                         accept='.json'
                         style={{display: 'none'}}
