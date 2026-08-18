@@ -123,7 +123,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
 
         try {
             const response = await fetch(
-                `plugins/${manifest.id}/user_attributes`,
+                `/plugins/${manifest.id}/user_attributes`,
                 Client4.getOptions({method: 'DELETE'}),
             );
 
