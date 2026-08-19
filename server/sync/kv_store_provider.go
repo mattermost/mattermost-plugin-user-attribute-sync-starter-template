@@ -29,6 +29,13 @@ func (f *KVStoreProvider) GetUserAttributes() ([]map[string]interface{}, error) 
 	if err := f.client.KV.Get(UserAttrsLastUpdatedKey, &rawTime); err != nil {
 		return nil, fmt.Errorf("failed to check lastUpdated timestamp: %w", err)
 	}
+	// An unset key means no file has ever been uploaded, or the last one was deleted.
+	// That is not an error, there is simply nothing to sync.
+	if len(rawTime) == 0 {
+		f.client.Log.Info("No timestamp found for last-updated")
+		return []map[string]interface{}{}, nil
+	}
+
 	var lastUpdated time.Time
 	if err := lastUpdated.UnmarshalJSON(rawTime); err != nil {
 		return nil, fmt.Errorf("malformed data [%s]\nwhile checking lastUpdated timestamp: %w", rawTime, err)

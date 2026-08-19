@@ -59,6 +59,19 @@ func TestKVStoreProvider_NoStoredFile(t *testing.T) {
 	assert.Empty(t, users)
 }
 
+// TestKVStoreProvider_NoTimestamp tests that an unset timestamp key is not an error. It is the
+// state of a fresh install, and of one whose stored file was deleted, so it has to mean
+// "nothing to sync" rather than failing on every job tick.
+func TestKVStoreProvider_NoTimestamp(t *testing.T) {
+	provider, api := newTestKVStoreProvider(t)
+
+	api.On("KVGet", UserAttrsLastUpdatedKey).Return(nil, nil).Once()
+
+	users, err := provider.GetUserAttributes()
+	require.NoError(t, err)
+	assert.Empty(t, users)
+}
+
 // TestKVStoreProvider_RDoesNotProcessTwice documents that this provider is relies on
 // a "processed" flag to be set when a file is updated, so it will not process the same file twice.
 func TestKVStoreProvider_DoesNotProcessTwice(t *testing.T) {
