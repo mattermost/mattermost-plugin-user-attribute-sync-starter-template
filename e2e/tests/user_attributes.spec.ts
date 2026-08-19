@@ -118,7 +118,7 @@ test.describe('user attributes upload and download', () => {
         await settings.deleteButton().click();
         await settings.cancelDeleteButton().click();
 
-        await expect(settings.confirmDeleteDialog()).toBeHidden()
+        await expect(settings.confirmDeleteDialog()).toBeHidden();
         await settings.expectFileOnServer();
         await expect(settings.downloadButton()).toBeEnabled();
     });

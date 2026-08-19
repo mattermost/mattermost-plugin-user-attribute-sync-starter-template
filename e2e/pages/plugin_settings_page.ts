@@ -57,7 +57,7 @@ export default class PluginSettingsPage {
     }
 
     cancelDeleteButton() {
-        return this.confirmDeleteDialog().getByRole('button', {name: "Cancel"});
+        return this.confirmDeleteDialog().getByRole('button', {name: 'Cancel'});
     }
 
     saveButton() {
