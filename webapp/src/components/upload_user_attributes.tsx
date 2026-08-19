@@ -9,6 +9,10 @@ import ConfirmModal from './confirm_modal';
 
 type Props = {
     id: string;
+
+    // The plugin is disabled, or the admin lacks write access to plugin settings. Note there is
+    // deliberately no setByEnv here: an environment variable can pin which source the plugin uses,
+    // but it cannot supply the stored file, so it is no reason to block managing that file.
     disabled?: boolean;
     setByEnv?: boolean;
 };
@@ -30,10 +34,10 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
 
     const inputRef = useRef<HTMLInputElement>(null);
 
-    const isDisabled = disabled || setByEnv;
-    const canUpload = pendingFile !== null && status === 'idle' && !isDisabled;
-    const canDownload = serverHasFile && status === 'idle' && !isDisabled;
-    const canDelete = serverHasFile && status === 'idle' && !isDisabled;
+    // Every action also waits for the current one to finish, so a second click cannot race it.
+    const canUpload = pendingFile !== null && status === 'idle' && !disabled;
+    const canDownload = serverHasFile && status === 'idle' && !disabled;
+    const canDelete = serverHasFile && status === 'idle' && !disabled;
 
     async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
         const newFile = e.target.files?.[0] ?? null;
@@ -191,7 +195,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                     <button
                         type='button'
                         className='btn btn-tertiary'
-                        disabled={isDisabled}
+                        disabled={disabled}
                         onClick={() => inputRef.current?.click()}
                     >{'Choose File'}</button>
                     <input
@@ -200,7 +204,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                         type='file'
                         accept='.json'
                         style={{display: 'none'}}
-                        disabled={isDisabled}
+                        disabled={disabled}
                         onChange={handleFileChange}
                     />
                     <button
@@ -225,7 +229,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                 title={'Delete stored user attributes file?'}
                 message={'The uploaded file will be removed from the server and the plugin will have nothing to sync. Attribute values already written to user profiles will remain. This cannot be undone.'}
                 confirmButtonText={'Delete'}
-                isConfirmDisabled={isDisabled}
+                isConfirmDisabled={disabled}
                 onConfirm={handleDelete}
                 onCancel={() => setShowDeleteConfirm(false)}
             />
