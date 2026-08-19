@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/mattermost/mattermost/server/public/model"
@@ -35,15 +36,8 @@ func (p *Plugin) initializeAPI() {
 }
 
 func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Request) {
-	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
-	userID := r.Header.Get("Mattermost-User-Id")
-	if userID == "" {
-		p.errorWithJSON(w, http.StatusUnauthorized, "log in")
-		return
-	}
-	// Access is locked down to a sysadmin
-	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
-		p.errorWithJSON(w, http.StatusForbidden, "not authorized")
+
+	if !p.checkSysAadmin(w, r) {
 		return
 	}
 
@@ -79,22 +73,27 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Update last updated time.
+	timeData, err := time.Now().MarshalJSON()
+	if err != nil {
+		p.client.Log.Error("failed to update timestamp to process file", "err", err)
+	}
+
+	// No returning early with an error after the file was uploaded, so the timestamp update is best effort.
+	if err == nil {
+		set, err := p.client.KV.Set(sync.UserAttrsLastUpdatedKey, timeData)
+		if !set || err != nil {
+			p.client.Log.Error("failed to udpate timestamp to process file", "err", err)
+		}
+	}
+
 	// Return acknowledgement
 	p.responseWithJSON(w, http.StatusCreated, "upload successful")
 
 }
 
 func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Request) {
-	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
-	userID := r.Header.Get("Mattermost-User-Id")
-	if userID == "" {
-		p.errorWithJSON(w, http.StatusUnauthorized, "log in")
-		return
-	}
-
-	// Access is locked down to a sysadmin
-	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
-		p.errorWithJSON(w, http.StatusForbidden, "not authorized")
+	if !p.checkSysAadmin(w, r) {
 		return
 	}
 
@@ -119,16 +118,7 @@ func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Req
 }
 
 func (p *Plugin) handleUserAttributesExist(w http.ResponseWriter, r *http.Request) {
-	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
-	userID := r.Header.Get("Mattermost-User-Id")
-	if userID == "" {
-		p.errorWithJSON(w, http.StatusUnauthorized, "log in")
-		return
-	}
-
-	// Access is locked down to a sysadmin
-	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
-		p.errorWithJSON(w, http.StatusForbidden, "not authorized")
+	if !p.checkSysAadmin(w, r) {
 		return
 	}
 
@@ -143,16 +133,7 @@ func (p *Plugin) handleUserAttributesExist(w http.ResponseWriter, r *http.Reques
 }
 
 func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Request) {
-	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
-	userID := r.Header.Get("Mattermost-User-Id")
-	if userID == "" {
-		p.errorWithJSON(w, http.StatusUnauthorized, "log in")
-		return
-	}
-
-	// Access is locked down to a sysadmin
-	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
-		p.errorWithJSON(w, http.StatusForbidden, "not authorized")
+	if !p.checkSysAadmin(w, r) {
 		return
 	}
 
@@ -161,7 +142,30 @@ func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	if err := p.client.KV.Delete(sync.UserAttrsLastUpdatedKey); err != nil {
+		// no early error return, timestamp deletion is best effort so we can still report the file was deleted.
+		// just log an error instead.
+		p.client.Log.Error("failed to delete file timestamp after file deletion: %w", err)
+	}
+
 	w.WriteHeader(http.StatusOK)
+}
+
+func (p *Plugin) checkSysAadmin(w http.ResponseWriter, r *http.Request) bool {
+	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
+	userID := r.Header.Get("Mattermost-User-Id")
+	if userID == "" {
+		p.errorWithJSON(w, http.StatusUnauthorized, "not logged in")
+		return false
+	}
+
+	// Access is locked down to a sysadmin
+	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
+		p.errorWithJSON(w, http.StatusForbidden, "not authorized")
+		return false
+	}
+
+	return true
 }
 
 func (p *Plugin) errorWithJSON(w http.ResponseWriter, responseCode int, errMessage string) {

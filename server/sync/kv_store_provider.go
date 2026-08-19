@@ -3,14 +3,17 @@ package sync
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 )
 
 const UserAttrsStoreKey = "user-attrs-file"
+const UserAttrsLastUpdatedKey = "user-attrs-last-updated"
 
 type KVStoreProvider struct {
-	client *pluginapi.Client
+	client     *pluginapi.Client
+	lastSynced time.Time
 }
 
 func NewKVStoreProvider(client *pluginapi.Client) *KVStoreProvider {
@@ -20,11 +23,27 @@ func NewKVStoreProvider(client *pluginapi.Client) *KVStoreProvider {
 }
 
 func (f *KVStoreProvider) GetUserAttributes() ([]map[string]interface{}, error) {
+
+	// No need to process users again if the file has not been changed since the last run
+	var rawTime []byte
+	if err := f.client.KV.Get(UserAttrsLastUpdatedKey, &rawTime); err != nil {
+		return nil, fmt.Errorf("failed to check lastUpdated timestamp: %w", err)
+	}
+	var lastUpdated time.Time
+	if err := lastUpdated.UnmarshalJSON(rawTime); err != nil {
+		return nil, fmt.Errorf("malformed data [%s]\nwhile checking lastUpdated timestamp: %w", rawTime, err)
+	}
+	if lastUpdated.IsZero() || lastUpdated.Before(f.lastSynced) {
+		return []map[string]interface{}{}, nil
+	}
+
 	var data []byte
-	err := f.client.KV.Get(UserAttrsStoreKey, &data)
-	if err != nil {
+	if err := f.client.KV.Get(UserAttrsStoreKey, &data); err != nil {
 		return nil, fmt.Errorf("failed to retrieve user attrs from store: %w", err)
 	}
+
+	// Update the sync after a successful read but before validation so we dont keep reading an invalid file
+	f.lastSynced = time.Now()
 
 	if len(data) == 0 {
 		return []map[string]interface{}{}, nil
