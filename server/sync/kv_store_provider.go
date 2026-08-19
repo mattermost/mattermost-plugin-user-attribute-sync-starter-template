@@ -29,11 +29,12 @@ func (f *KVStoreProvider) GetUserAttributes() ([]map[string]interface{}, error) 
 	if err := f.client.KV.Get(UserAttrsLastUpdatedKey, &rawTime); err != nil {
 		return nil, fmt.Errorf("failed to check lastUpdated timestamp: %w", err)
 	}
-	// An unset key means no file has ever been uploaded, or the last one was deleted.
-	// That is not an error, there is simply nothing to sync.
+
+	// An unset key means no file has ever been uploaded, or the last one was deleted. Checked
+	// explicitly because time.Time.UnmarshalJSON rejects empty input, and its error says nothing
+	// about the actual cause.
 	if len(rawTime) == 0 {
-		f.client.Log.Info("No timestamp found for last-updated")
-		return []map[string]interface{}{}, nil
+		return nil, fmt.Errorf("no user attributes file in the KV store: %s is unset — upload one from the System Console", UserAttrsLastUpdatedKey)
 	}
 
 	var lastUpdated time.Time
@@ -52,8 +53,11 @@ func (f *KVStoreProvider) GetUserAttributes() ([]map[string]interface{}, error) 
 	// Update the sync after a successful read but before validation so we dont keep reading an invalid file
 	f.lastSynced = time.Now()
 
+	// A live timestamp with no data behind it means the two keys are out of step: something wrote
+	// or removed one without the other. There is nothing to sync either way, and unlike the
+	// unchanged case above it is not a state the plugin produces on its own.
 	if len(data) == 0 {
-		return []map[string]interface{}{}, nil
+		return nil, fmt.Errorf("no user attributes file in the KV store: %s is set but %s is empty", UserAttrsLastUpdatedKey, UserAttrsStoreKey)
 	}
 
 	var users []map[string]interface{}

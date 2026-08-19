@@ -44,7 +44,9 @@ func TestKVStoreProvider_ReturnsStoredUsers(t *testing.T) {
 	assert.Equal(t, "Sales", users[1]["job_title"])
 }
 
-// TestKVStoreProvider_NoStoredFile tests that an unset key is not an error, just no work to do
+// TestKVStoreProvider_NoStoredFile tests that a timestamp with no file behind it is an error.
+// The two keys are written and removed together, so this state means something desynchronized
+// them, and it is not one the plugin can reach on its own.
 func TestKVStoreProvider_NoStoredFile(t *testing.T) {
 	provider, api := newTestKVStoreProvider(t)
 
@@ -55,22 +57,26 @@ func TestKVStoreProvider_NoStoredFile(t *testing.T) {
 	api.On("KVGet", UserAttrsStoreKey).Return(nil, nil).Once()
 
 	users, err := provider.GetUserAttributes()
-	require.NoError(t, err)
-	assert.Empty(t, users)
+	assert.Error(t, err)
+	assert.Nil(t, users)
+	assert.Contains(t, err.Error(), "no user attributes file in the KV store")
 }
 
-// TestKVStoreProvider_NoTimestamp tests that an unset timestamp key is not an error. It is the
-// state of a fresh install, and of one whose stored file was deleted, so it has to mean
-// "nothing to sync" rather than failing on every job tick.
+// TestKVStoreProvider_NoTimestamp tests that an unset timestamp key is an error, matching how
+// FileProvider treats a missing file. Sync is pointed at this store, so finding nothing in it is a
+// misconfiguration to surface rather than silently accept.
+//
+// It is checked explicitly rather than left to time.Time.UnmarshalJSON, which rejects empty input
+// with a message that says nothing about the cause.
 func TestKVStoreProvider_NoTimestamp(t *testing.T) {
 	provider, api := newTestKVStoreProvider(t)
 
 	api.On("KVGet", UserAttrsLastUpdatedKey).Return(nil, nil).Once()
-	api.On("LogInfo", "No timestamp found for last-updated").Once()
 
 	users, err := provider.GetUserAttributes()
-	require.NoError(t, err)
-	assert.Empty(t, users)
+	assert.Error(t, err)
+	assert.Nil(t, users)
+	assert.Contains(t, err.Error(), "no user attributes file in the KV store")
 }
 
 // TestKVStoreProvider_RDoesNotProcessTwice documents that this provider is relies on
