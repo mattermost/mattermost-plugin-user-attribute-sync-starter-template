@@ -26,6 +26,9 @@ func (c *closeRecorder) Close() error {
 	return nil
 }
 
+// TestNewAttributeProvider tests that each configured value maps to the right provider, that an
+// unrecognized value panics rather than syncing nothing silently, and that swapping providers
+// closes the one being replaced.
 func TestNewAttributeProvider(t *testing.T) {
 	newPlugin := func(provider string) *Plugin {
 		return &Plugin{

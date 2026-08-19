@@ -15,18 +15,30 @@ import (
 )
 
 const (
+	// maxFileSizeBytes caps the attributes file an admin can upload. The webapp enforces the
+	// same limit client-side (MAX_FILE_BYES in upload_user_attributes.tsx) so the user gets an
+	// immediate error instead of a failed request; the two are independent and must be kept in step.
 	maxFileSizeBytes = 10 * 1024 * 1024
 )
 
+// ServeHTTP is the entry point for every request the Mattermost server proxies to this plugin,
+// under /plugins/<plugin id>/. It delegates to the router built in initializeAPI.
 func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Request) {
 	p.router.ServeHTTP(w, r)
 }
 
+// initializeAPI builds the plugin's HTTP router. It must be called before any request can be
+// served, so OnActivate calls it first.
+//
+// These endpoints let an admin manage the attributes file directly through the System Console
+// rather than installing a file on the server's filesystem, which is what KVStoreProvider reads.
+// They are only useful with that provider selected; FileProvider ignores the KV store entirely.
+//
+// There is no router-level middleware, so every handler is individually responsible for calling
+// checkSysAadmin. A new route that forgets to is publicly reachable.
 func (p *Plugin) initializeAPI() {
 	router := mux.NewRouter()
 
-	// These endpoints are to allow an admin to upload a file directly through the System Console
-	// rather than manually installing a file on the filesystem
 	router.HandleFunc("/user_attributes", p.handleUploadUserAttributes).Methods("POST")
 	router.HandleFunc("/user_attributes", p.handleDownloadUserAttributes).Methods("GET")
 	router.HandleFunc("/user_attributes/exists", p.handleUserAttributesExist).Methods("GET")
@@ -35,13 +47,20 @@ func (p *Plugin) initializeAPI() {
 	p.router = router
 }
 
+// handleUploadUserAttributes stores an uploaded attributes file in the KV store, where
+// KVStoreProvider will find it on the next sync.
+//
+// It writes two keys: the file itself, and a timestamp that tells the provider the file is new.
+// The file write is the one that matters — once it succeeds the upload is reported as successful
+// even if the timestamp write fails, because the alternative is telling the admin the upload
+// failed when their data is in fact stored.
 func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Request) {
 
 	if !p.checkSysAadmin(w, r) {
 		return
 	}
 
-	// Put in size protections and read
+	// Cap the body before reading it, so an oversized upload cannot exhaust memory
 	r.Body = http.MaxBytesReader(w, r.Body, maxFileSizeBytes)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -55,14 +74,23 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Validate - we can also check for valid email and unrecognized fields - for a large file reject all or accept partial and warn?
+	// Validate the shape only: the payload has to be an array of objects, matching what
+	// AttributeProvider returns.
+	//
+	// Individual records are deliberately not checked here. Rejecting an entire file because one
+	// record is bad is the wrong trade-off — data pulled from an external system routinely has a
+	// few unusable records, and refusing all of it means syncing nothing. Value sync already
+	// handles them one at a time: unknown fields, unsupported types, unmatched emails and failed
+	// writes each log a warning and move on to the next record.
 	var userAttrs []map[string]interface{}
 	if err := json.Unmarshal(raw, &userAttrs); err != nil {
 		p.errorWithJSON(w, http.StatusBadRequest, "invalid json - must be array of objects")
 		return
 	}
 
-	// Store in KV
+	// Store the raw bytes rather than the decoded value, so a download returns exactly
+	// what was uploaded. Note KV.Set reports failure two ways: an error, or set == false
+	// meaning the write did not happen.
 	set, err := p.client.KV.Set(sync.UserAttrsStoreKey, raw)
 	if err != nil {
 		p.client.Log.Error("failed to upload userAttrs file", "err", err)
@@ -73,7 +101,8 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Update last updated time.
+	// Update last updated time. This is what KVStoreProvider compares against to decide the
+	// stored file is new; without it the file sits in the KV store and is never synced.
 	timeData, err := time.Now().MarshalJSON()
 	if err != nil {
 		p.client.Log.Error("failed to update timestamp to process file", "err", err)
@@ -92,6 +121,9 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 
 }
 
+// handleDownloadUserAttributes returns the stored attributes file verbatim, so an admin can see
+// exactly what the plugin is syncing. This is the one handler that does not respond with the JSON
+// envelope, because the body is the file itself.
 func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Request) {
 	if !p.checkSysAadmin(w, r) {
 		return
@@ -117,6 +149,9 @@ func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Req
 	}
 }
 
+// handleUserAttributesExist reports whether a file is currently stored, as {"exists": bool}.
+// The settings UI calls this on load to decide whether to offer Download and Delete, which it
+// could not do from the download endpoint without pulling the whole file down.
 func (p *Plugin) handleUserAttributesExist(w http.ResponseWriter, r *http.Request) {
 	if !p.checkSysAadmin(w, r) {
 		return
@@ -132,6 +167,12 @@ func (p *Plugin) handleUserAttributesExist(w http.ResponseWriter, r *http.Reques
 	p.responseWithJSON(w, http.StatusOK, map[string]bool{"exists": len(userAttrs) > 0})
 }
 
+// handleDeleteUserAttributes removes the stored file and its timestamp.
+//
+// Attribute values already written to user profiles are not affected — deleting the source does not
+// retract what has already been synced. Note this leaves KVStoreProvider with nothing to read,
+// which it reports as an error on every subsequent sync until a replacement is uploaded; both keys
+// are removed together so that error names the right cause.
 func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Request) {
 	if !p.checkSysAadmin(w, r) {
 		return
@@ -151,6 +192,13 @@ func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 }
 
+// checkSysAadmin restricts a request to system admins, writing the error response itself and
+// returning false when the caller should stop. Every handler has to call it first — see
+// initializeAPI on why there is no middleware doing this centrally.
+//
+// These endpoints read and overwrite the data that feeds every user's attributes, and attributes
+// can gate channel access through ABAC policies, so system-admin is the right bar rather than
+// merely "logged in".
 func (p *Plugin) checkSysAadmin(w http.ResponseWriter, r *http.Request) bool {
 	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
 	userID := r.Header.Get("Mattermost-User-Id")

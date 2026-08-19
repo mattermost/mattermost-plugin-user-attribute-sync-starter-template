@@ -14,24 +14,42 @@ type Props = {
     // deliberately no setByEnv here: an environment variable can pin which source the plugin uses,
     // but it cannot supply the stored file, so it is no reason to block managing that file.
     disabled?: boolean;
-    setByEnv?: boolean;
 };
 
-type UserFile = {
+// A file the admin has chosen but not yet uploaded. recordCount comes from the validation parse,
+// so it can be shown as confirmation of what is about to be sent.
+type ChosenFile = {
     file: File;
     recordCount: number;
 }
 
+// Mirrors maxFileSizeBytes in server/http_hooks.go. Checking here means an oversized file is
+// rejected before it is uploaded; the server enforces the same limit regardless.
 const MAX_FILE_BYES = 10 * 1024 * 1024;
 
-export default function UploadUserAttributes({id, disabled = false, setByEnv = false}: Props) {
-    const [pendingFile, setPendingFile] = useState<UserFile | null>(null);
+/**
+ * UploadUserAttributes manages the attributes file that KVStoreProvider syncs from, through the
+ * plugin's own HTTP API in server/http_hooks.go.
+ *
+ * Unlike the provider choice above it, these actions are immediate — they do not go through the
+ * admin console's Save button, because they are operations on stored data rather than changes to a
+ * setting. That is also why they can report their own success and failure inline.
+ */
+export default function UploadUserAttributes({id, disabled = false}: Props) {
+    const [pendingFile, setPendingFile] = useState<ChosenFile | null>(null);
+
+    // null until the exists check comes back, so the UI does not claim there is no file before
+    // it has actually asked.
     const [serverHasFile, setServerHasFile] = useState<boolean | null>(null);
+
+    // A single in-flight action at a time, which drives both the button labels and their
+    // disabled state. Prevents, for example, deleting while an upload is still running.
     const [status, setStatus] = useState<'idle' | 'downloading' | 'uploading' | 'deleting'>('idle');
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+    // The file input is hidden, so it is triggered and cleared through this ref.
     const inputRef = useRef<HTMLInputElement>(null);
 
     // Every action also waits for the current one to finish, so a second click cannot race it.
@@ -39,6 +57,8 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
     const canDownload = serverHasFile && status === 'idle' && !disabled;
     const canDelete = serverHasFile && status === 'idle' && !disabled;
 
+    // Validates the chosen file locally and holds it as pending. Nothing is sent until the admin
+    // presses Upload, so a mistaken selection costs nothing.
     async function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
         const newFile = e.target.files?.[0] ?? null;
         setError(null);
@@ -54,6 +74,9 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
             }
             const text = await newFile.text();
 
+            // The same shape check the server does: an array of objects, one per user. Contents
+            // are not validated here — the server does not either, and unrecognized fields or
+            // unmatched emails surface as warnings in the plugin logs during the next sync.
             const parsed: unknown = JSON.parse(text);
             if (!Array.isArray(parsed) ||
                 parsed.some((r) => typeof r !== 'object' || r === null || Array.isArray(r))) {
@@ -63,12 +86,16 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
             setPendingFile({file: newFile, recordCount: parsed.length});
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Could not read file');
+
+            // Clear the input so picking the same file again re-fires onChange, which the browser
+            // otherwise skips when the selection has not changed.
             if (inputRef.current) {
                 inputRef.current.value = '';
             }
         }
     }
 
+    // Sends the pending file to the plugin.
     async function handleUpload() {
         if (pendingFile === null) {
             return;
@@ -114,6 +141,9 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
                 throw new Error(`Download failed (${response.status})`);
             }
 
+            // Trigger a browser download from the response body. A plain link to the endpoint
+            // would work too, but this way a failed request shows an error in the UI instead of
+            // navigating away or silently saving an error page.
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -128,6 +158,8 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
         }
     }
 
+    // Removes the stored file. Only reachable through the confirmation modal, because there is no
+    // copy on the server to restore from and already-synced attribute values are left behind.
     async function handleDelete() {
         setShowDeleteConfirm(false);
         setStatus('deleting');
@@ -153,6 +185,9 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
         }
     }
 
+    // Asks whether a file is already stored, so Download and Delete are only offered when there is
+    // something to act on. A failure is left silent: the buttons stay disabled, which is the same
+    // outcome as having no file, and an error here says nothing about the admin's own action.
     async function checkServerFileStatus() {
         const response = await fetch(`/plugins/${manifest.id}/user_attributes/exists`);
         if (response.ok) {

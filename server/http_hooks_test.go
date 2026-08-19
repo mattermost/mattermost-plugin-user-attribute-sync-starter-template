@@ -125,6 +125,8 @@ func TestUserAttributesAccessControl(t *testing.T) {
 	}
 }
 
+// TestHandleUploadUserAttributes covers the upload path: what is stored, and the four ways a
+// request is refused (malformed JSON, wrong shape, too large, and a KV write that did not take).
 func TestHandleUploadUserAttributes(t *testing.T) {
 	validFile := []byte(`[{"email":"user1@example.com","job_title":"Engineer"}]`)
 
@@ -206,6 +208,8 @@ func TestHandleUploadUserAttributes(t *testing.T) {
 	})
 }
 
+// TestHandleDownloadUserAttributes checks that a download returns the stored bytes unchanged,
+// and that "nothing stored" is a 404 rather than an empty 200.
 func TestHandleDownloadUserAttributes(t *testing.T) {
 	t.Run("returns the stored file", func(t *testing.T) {
 		p, api := newTestPlugin(t)
@@ -247,6 +251,8 @@ func TestHandleDownloadUserAttributes(t *testing.T) {
 	})
 }
 
+// TestHandleUserAttributesExist covers the endpoint the settings UI polls on load. Both answers
+// are a 200 with an "exists" flag; only a storage failure is an error.
 func TestHandleUserAttributesExist(t *testing.T) {
 	t.Run("reports a stored file", func(t *testing.T) {
 		p, api := newTestPlugin(t)
@@ -291,6 +297,8 @@ func TestHandleUserAttributesExist(t *testing.T) {
 	})
 }
 
+// TestHandleDeleteUserAttributes checks that deleting removes both KV keys, so the provider is
+// left with neither data nor a timestamp pointing at data that is gone.
 func TestHandleDeleteUserAttributes(t *testing.T) {
 	t.Run("deletes the stored file", func(t *testing.T) {
 		p, api := newTestPlugin(t)

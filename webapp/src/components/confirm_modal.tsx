@@ -12,6 +12,17 @@ type Props = {
     onCancel: () => void;
 }
 
+/**
+ * ConfirmModal guards a destructive action behind an explicit confirmation.
+ *
+ * The Mattermost webapp has a GenericModal for this, but it is not exported to plugins, so this is
+ * a local equivalent built on react-bootstrap — which is a webpack external (see
+ * webpack.config.js) supplied by the host webapp at runtime, not an installed dependency. Only its
+ * types are in package.json; do not add react-bootstrap itself.
+ *
+ * The GenericModal__* and ConfirmModal__* class names are the webapp's own, reused so the dialog
+ * matches the rest of the System Console rather than looking like a plugin bolted on.
+ */
 export default function ConfirmModal({
     show,
     title,

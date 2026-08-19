@@ -7,6 +7,10 @@ import (
 	"github.com/pkg/errors"
 )
 
+// The accepted values of the AttributeProvider setting. These strings are stored in the server
+// configuration, so they are effectively a wire format: the radio values in
+// webapp/src/components/attribute_provider.tsx and the default in plugin.json have to match them
+// exactly, and renaming one means migrating existing installations.
 const (
 	ConfigAttributeProviderFile    = "FileProvider"
 	ConfigAttributeProviderKVStore = "KVStore"
@@ -28,7 +32,15 @@ type configuration struct {
 	// SyncIntervalMinutes determines how often (in minutes) the plugin syncs user attributes
 	// from the external source. Must be at least 1 minute.
 	SyncIntervalMinutes int
-	AttributeProvider   string
+
+	// AttributeProvider selects which example data source to sync from — one of the
+	// ConfigAttributeProvider* values above. It is rendered in the System Console by a custom
+	// webapp component rather than a built-in control, because the KVStore option needs upload
+	// and download buttons alongside the choice itself.
+	//
+	// A plugin built from this template would normally have a single data source and no such
+	// setting; it exists here to demonstrate both examples in one build.
+	AttributeProvider string
 }
 
 // Clone shallow copies the configuration. Your implementation may require a deep copy if
@@ -61,6 +73,9 @@ func (p *Plugin) getConfiguration() *configuration {
 // This method panics if setConfiguration is called with the existing configuration. This almost
 // certainly means that the configuration was modified without being cloned and may result in
 // an unsafe access.
+//
+// It also rebuilds the attribute provider, so changing the source in the System Console takes
+// effect without restarting the plugin.
 func (p *Plugin) setConfiguration(configuration *configuration) {
 	p.configurationLock.Lock()
 	defer p.configurationLock.Unlock()
@@ -80,6 +95,18 @@ func (p *Plugin) setConfiguration(configuration *configuration) {
 	p.attributeProvider = p.NewAttributeProvider()
 }
 
+// NewAttributeProvider constructs the data source named by the current configuration, closing
+// whichever provider was in use before so its resources are not leaked.
+//
+// It reads p.configuration directly rather than calling getConfiguration(), because
+// setConfiguration calls it while already holding configurationLock and RWMutex is not reentrant.
+//
+// It panics on an unrecognized value: the setting is constrained to the ConfigAttributeProvider*
+// values by the System Console, so anything else means the switch and the constants have drifted
+// apart, and syncing nothing silently would be worse than failing loudly.
+//
+// A plugin adapted from this template would usually drop this switch and construct its one real
+// provider in OnActivate instead.
 func (p *Plugin) NewAttributeProvider() sync.AttributeProvider {
 	if p.attributeProvider != nil {
 		p.attributeProvider.Close()

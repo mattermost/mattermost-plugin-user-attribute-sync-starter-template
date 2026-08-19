@@ -43,11 +43,14 @@ export default class PluginSettingsPage {
         return this.page.getByRole('button', {name: 'Download'});
     }
 
+    // Scoped to the settings panel because the confirmation dialog has a Delete button too, and an
+    // unscoped lookup would match both once the dialog is open.
     deleteButton() {
         return this.page.locator('.UserAttrSync').getByRole('button', {name: 'Delete'});
     }
 
-    // Need to use a CSS id here since getByRole will
+    // Located by its accessible name, which comes from the aria-labelledby heading in
+    // confirm_modal.tsx. Changing that title text means changing it here.
     confirmDeleteDialog() {
         return this.page.getByRole('dialog', {name: 'Delete stored user attributes file?'});
     }

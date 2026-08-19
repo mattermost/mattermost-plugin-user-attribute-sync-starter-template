@@ -15,6 +15,10 @@ export default class Plugin {
     public async initialize(registry: PluginRegistry, store: Store<GlobalState, Action<Record<string, unknown>>>) {
         // @see https://developers.mattermost.com/extend/plugins/webapp/reference/
 
+        // This plugin's webapp bundle exists solely to render one System Console setting. The
+        // first argument must match the setting key in plugin.json, which declares it as
+        // "type": "custom" so the console defers to this component. showTitle lets the console
+        // draw the setting's label next to it, so it lines up with the settings above.
         registry.registerAdminConsoleCustomSetting('AttributeProvider', AttributeProvider, {showTitle: true});
     }
 }

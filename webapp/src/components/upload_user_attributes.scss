@@ -9,6 +9,7 @@
         gap: 8px;
     }
 
+    // Small uppercase section labels, matching how the System Console titles subsections.
     &__heading {
         margin: 0;
         color: rgba(var(--center-channel-color-rgb), 0.75);
@@ -31,6 +32,8 @@
     }
 }
 
+// Counterpart to the webapp's existing .error-text, which the console already styles. There is no
+// equivalent success class to inherit, so define one using the theme's semantic success color.
 .success-text {
     color: rgb(var(--semantic-color-success));
 }

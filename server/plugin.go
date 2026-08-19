@@ -19,14 +19,16 @@ type Plugin struct {
 	// client is the Mattermost server API client.
 	client *pluginapi.Client
 
-	// router is the HTTP router that serves API endpoints
+	// router is the HTTP router that serves API endpoints.
 	router *mux.Router
 
 	// backgroundJob runs attribute sync on the configured time interval.
 	backgroundJob *cluster.Job
 
 	// attributeProvider provides an example of syncing user attribute data from external source.
-	// there are two example provided in this repo: FileProvider and KVStoreProvider
+	// there are two examples provided in this repo: FileProvider and KVStoreProvider.
+	// Which one is in use is decided by the AttributeProvider setting, so this is replaced
+	// whenever the configuration changes — see NewAttributeProvider in configuration.go.
 	attributeProvider attrsync.AttributeProvider
 
 	// groupID is the ID of the Mattermost property group this plugin reads and writes.
@@ -50,6 +52,8 @@ type Plugin struct {
 func (p *Plugin) OnActivate() error {
 	p.client = pluginapi.NewClient(p.API, p.Driver)
 
+	// Register the HTTP routes that back the System Console upload UI. Do this before anything
+	// that can fail, so the endpoints exist for any request the server routes to us.
 	p.initializeAPI()
 
 	// "access_control" is the property group whose fields can be referenced
@@ -73,8 +77,8 @@ func (p *Plugin) OnActivate() error {
 	}
 	p.client.Log.Info("Field sync completed successfully")
 
-	// Initialize the file provider
-	// Note:  p.client must be initialized prior to this call
+	// Initialize the configured attribute provider.
+	// Note: p.client must be initialized prior to this call, because KVStoreProvider needs it.
 	p.attributeProvider = p.NewAttributeProvider()
 
 	// Set up the attribute sync cluster job
@@ -97,7 +101,8 @@ func (p *Plugin) OnActivate() error {
 }
 
 // OnDeactivate is invoked when the plugin is deactivated.
-// Cleans up the attribute sync cluster job and file provider to prevent orphaned resources.
+// Cleans up the attribute sync cluster job and the attribute provider to prevent orphaned
+// resources. The HTTP router needs no cleanup; the server stops routing to a deactivated plugin.
 func (p *Plugin) OnDeactivate() error {
 	if p.backgroundJob != nil {
 		if err := p.backgroundJob.Close(); err != nil {

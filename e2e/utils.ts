@@ -26,6 +26,12 @@ export async function getHTTPHeaders(context: APIRequestContext) {
     };
 }
 
+/**
+ * Logs in as the system admin and returns the authenticated context.
+ *
+ * Called once from global-setup.ts, which saves the resulting storage state so specs can start
+ * already logged in rather than driving the login form each time.
+ */
 export async function loginAsAdmin() {
     const context = await request.newContext({
         baseURL,
@@ -57,10 +63,15 @@ export async function loginAsAdmin() {
     return context;
 }
 
+/**
+ * An API context reusing the session global-setup.ts saved, for tests that need to set up or clean
+ * up through the API. Dispose of it when done, or Playwright reports an open handle.
+ */
 export async function adminAPIContext() {
     return request.newContext({baseURL, storageState: adminStorageStatePath});
 }
 
+/** Enables the plugin, so its settings section and HTTP routes exist. */
 export async function apiEnablePlugin(context: APIRequestContext) {
     const headers = await getHTTPHeaders(context);
     const response = await context.post(`/api/v4/plugins/${pluginID}/enable`, {headers});

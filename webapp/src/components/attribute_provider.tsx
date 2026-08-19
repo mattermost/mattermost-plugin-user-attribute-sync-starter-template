@@ -4,12 +4,21 @@ import UploadUserAttributes from './upload_user_attributes';
 
 import './attribute_provider.scss';
 
+// Must match the ConfigAttributeProvider* constants in server/configuration.go.
 type Provider = 'FileProvider' | 'KVStore'
 
+// The System Console passes more props than this (label, helpText, config, license,
+// registerSaveAction, ...); these are the ones this setting needs. See buildCustomSetting in the
+// server repo's schema_admin_settings.tsx for the full set.
 type Props = {
     id: string;
     value?: Provider;
+
+    // Reports the new value to the admin console, which marks the setting dirty. Nothing is
+    // persisted until the admin clicks Save, at which point the server rebuilds the provider.
     onChange: (id: string, value: Provider) => void;
+
+    // The plugin is disabled, or the admin lacks write access to plugin settings.
     disabled?: boolean;
 
     // This setting is pinned by an environment variable, so the choice cannot be changed here.
@@ -17,8 +26,18 @@ type Props = {
     setByEnv?: boolean;
 };
 
+/**
+ * AttributeProvider renders the "User Attribute Source" setting in the System Console.
+ *
+ * plugin.json declares the setting as "type": "custom" and index.tsx registers this component for
+ * it, because choosing a source is more than a value: the Direct Upload option also needs a way to
+ * get a file to the server, which the built-in setting controls cannot do.
+ *
+ * Radios rather than a dropdown, and inline styles matching the console's own RadioSetting
+ * classes, so the setting looks like the ones around it.
+ */
 export default function AttributeProvider({id, value, onChange, disabled, setByEnv}: Props) {
-// Matches the console's own RadioSetting: an env-pinned value is as good as disabled, because
+    // Matches the console's own RadioSetting: an env-pinned value is as good as disabled, because
     // saving a different choice here would not change what the server actually uses.
     const isDisabled = disabled || setByEnv;
 
