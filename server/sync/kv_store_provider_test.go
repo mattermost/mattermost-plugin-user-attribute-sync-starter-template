@@ -66,6 +66,7 @@ func TestKVStoreProvider_NoTimestamp(t *testing.T) {
 	provider, api := newTestKVStoreProvider(t)
 
 	api.On("KVGet", UserAttrsLastUpdatedKey).Return(nil, nil).Once()
+	api.On("LogInfo", "No timestamp found for last-updated").Once()
 
 	users, err := provider.GetUserAttributes()
 	require.NoError(t, err)
