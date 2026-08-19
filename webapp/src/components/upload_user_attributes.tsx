@@ -3,8 +3,8 @@ import React, {useRef, useState, useEffect} from 'react';
 import type {ChangeEvent} from 'react';
 
 import {Client4} from 'mattermost-redux/client';
+
 import './upload_user_attributes.scss';
-import './confirm_modal';
 import ConfirmModal from './confirm_modal';
 
 type Props = {
@@ -25,6 +25,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
     const [serverHasFile, setServerHasFile] = useState<boolean | null>(null);
     const [status, setStatus] = useState<'idle' | 'downloading' | 'uploading' | 'deleting'>('idle');
     const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const inputRef = useRef<HTMLInputElement>(null);
@@ -71,6 +72,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
 
         setStatus('uploading');
         setError(null);
+        setSuccess(null);
 
         try {
             const response = await fetch(
@@ -88,6 +90,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
             if (inputRef.current) {
                 inputRef.current.value = '';
             }
+            setSuccess('File uploaded');
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Upload failed');
         } finally {
@@ -97,6 +100,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
 
     async function handleDownload() {
         setStatus('downloading');
+        setSuccess(null);
         setError(null);
 
         try {
@@ -124,6 +128,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
         setShowDeleteConfirm(false);
         setStatus('deleting');
         setError(null);
+        setSuccess(null);
 
         try {
             const response = await fetch(
@@ -136,6 +141,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
             }
 
             setServerHasFile(false);
+            setSuccess('File Deleted');
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Delete failed');
         } finally {
@@ -161,7 +167,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
             className='UserAttrSync'
         >
             <section className='UserAttrSync__section'>
-                <h5 className='UserAttrSync__heading'>{'Current file'}</h5>
+                <h5 className='UserAttrSync__heading'>{'Current file status'}</h5>
                 <div className='UserAttrSync__row'>
                     <span>{serverHasFile ? 'File detected' : 'No file on server'}</span>
                     <button
@@ -212,6 +218,7 @@ export default function UploadUserAttributes({id, disabled = false, setByEnv = f
             </section>
 
             {error && <div className='error-text'>{error}</div>}
+            {success && <div className='success-text'>{success}</div>}
 
             <ConfirmModal
                 show={showDeleteConfirm}

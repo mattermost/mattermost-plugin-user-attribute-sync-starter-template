@@ -34,7 +34,6 @@
                 "key": "AttributeProvider",
                 "display_name": "User Attribute Source",
                 "type": "custom",
-                "help_text": "Where to pull in user attributes - from local filesystem or direct upload",
                 "default": "FileProvider"
             }
         ]

@@ -79,6 +79,10 @@ export default class PluginSettingsPage {
         return this.page.locator('.error-text');
     }
 
+    successText() {
+        return this.page.locator('.success-text');
+    }
+
     // --- actions -----------------------------------------------------------
 
     async selectProvider(label: ProviderLabel) {

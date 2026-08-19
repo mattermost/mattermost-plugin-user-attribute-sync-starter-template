@@ -43,6 +43,7 @@ test.describe('user attributes upload and download', () => {
 
         await settings.expectFileOnServer();
         await expect(settings.errorText()).toHaveCount(0);
+        await expect(settings.successText()).toBeVisible();
     });
 
     const invalidFiles = [
@@ -59,6 +60,7 @@ test.describe('user attributes upload and download', () => {
             await settings.chooseFile(invalid.path);
 
             await expect(settings.errorText()).toBeVisible();
+            await expect(settings.successText()).toHaveCount(0);
             await expect(settings.uploadButton()).toBeDisabled();
             await settings.expectNoFileOnServer();
         });
@@ -101,6 +103,7 @@ test.describe('user attributes upload and download', () => {
 
         await settings.expectNoFileOnServer();
         await expect(settings.downloadButton()).toBeDisabled();
+        await expect(settings.successText()).toBeVisible();
     });
 
      test('keeps the stored file when the delete modal is dismissed', async ({page}) => {
