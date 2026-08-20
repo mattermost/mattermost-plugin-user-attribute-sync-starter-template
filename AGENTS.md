@@ -265,6 +265,7 @@ cd e2e && npm test -- -g 'renders both attribute provider'  # by title
 - **Interface-driven:** `AttributeProvider` enables pluggable data sources
 - **HTTP responses:** JSON via the `errorWithJSON` / `responseWithJSON` helpers in `http_hooks.go`, not hand-written `w.Write`. Download is the deliberate exception — it streams the stored bytes verbatim.
 - **Webapp:** function components with hooks, no Redux (the admin console owns the setting's value), literal strings in JSX braces per the Mattermost eslint config, and no i18n — this is a template, so strings are inline rather than translated.
+- **No license headers.** Do not add `// Copyright (c) …` / `// See LICENSE.txt …` blocks to any file. No source file in this repo carries one, and `webapp/.eslintrc.json` sets `"header/header": "off"`. Licensing lives in `LICENSE` at the repo root.
 
 ## Mattermost API Surface
 
