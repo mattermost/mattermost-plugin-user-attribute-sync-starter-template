@@ -37,7 +37,7 @@ export const pluginSettingsURL = `${baseURL}/admin_console/plugins/plugin_${plug
 
 // Plugin REST routes, registered in server/http_hooks.go.
 export const userAttributesURL = `${baseURL}/plugins/${pluginID}/user_attributes`;
-export const userAttributesExistsURL = `${userAttributesURL}/exists`;
+export const userAttributesStatusURL = `${userAttributesURL}/status`;
 
 // Values of the AttributeProvider setting, mirroring the constants in
 // server/configuration.go.

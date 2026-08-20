@@ -129,7 +129,7 @@ The upload panel is a client for four endpoints the plugin registers itself, in 
 |--------|------|---------|
 | `POST` | `/user_attributes` | Store an attributes file. Body is the raw JSON. |
 | `GET` | `/user_attributes` | Download the stored file. |
-| `GET` | `/user_attributes/exists` | `{"exists": bool}` — check without downloading. |
+| `GET` | `/user_attributes/status` | `{"exists": bool, "lastUpdated": time\|null}` — check what is stored, and when it was uploaded, without downloading. |
 | `DELETE` | `/user_attributes` | Remove the stored file. |
 
 All four are prefixed with `/plugins/com.mattermost.user-attribute-sync-starter-template`, and all four require a **system admin** — these endpoints overwrite the data behind every user's attributes, and those attributes can gate channel access through ABAC policies. Authentication uses the `Mattermost-User-Id` header, which the Mattermost server sets on the way in and which is the only header a plugin can trust.

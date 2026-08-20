@@ -7,11 +7,11 @@ import AttributeProvider from './attribute_provider';
 let fetchMock: jest.Mock;
 
 beforeEach(() => {
-    // The upload panel asks the server whether a file is already stored as soon as it mounts, and
-    // jsdom provides no fetch. Answering "no file" keeps that out of the way of these tests.
+    // The upload panel asks the server what is stored as soon as it mounts, and jsdom provides no
+    // fetch. Answering "no file" keeps that out of the way of these tests.
     fetchMock = jest.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({exists: false}),
+        json: () => Promise.resolve({exists: false, lastUpdated: null}),
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 });

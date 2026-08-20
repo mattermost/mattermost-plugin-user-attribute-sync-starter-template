@@ -23,9 +23,39 @@ type ChosenFile = {
     recordCount: number;
 }
 
+type FileStatus = {
+    exists: boolean;
+    lastUpdated: string | null;
+}
+
 // Mirrors maxFileSizeBytes in server/http_hooks.go. Checking here means an oversized file is
 // rejected before it is uploaded; the server enforces the same limit regardless.
 const MAX_FILE_BYES = 10 * 1024 * 1024;
+
+// Narrows an untrusted response body to FileStatus, so a malformed or truncated answer degrades to
+// "no file" instead of putting undefined into state and rendering it.
+function parseFileStatus(body: unknown): FileStatus {
+    const record = (body ?? {}) as Record<string, unknown>;
+    return {
+        exists: Boolean(record.exists),
+        lastUpdated: typeof record.lastUpdated === 'string' ? record.lastUpdated : null,
+    };
+}
+
+// The single line describing what is stored. The timestamp arrives as RFC 3339 from the server and
+// is rendered in the admin's own locale and time zone, since it is only ever read by a person.
+function describeFileStatus(fileStatus: FileStatus | null): string {
+    if (fileStatus === null) {
+        return 'Unknown';
+    }
+    if (!fileStatus.exists) {
+        return 'No file on server';
+    }
+    if (fileStatus.lastUpdated === null) {
+        return 'File detected - upload time unknown - please reupload';
+    }
+    return `File detected - uploaded ${new Date(fileStatus.lastUpdated).toLocaleString()}`;
+}
 
 /**
  * UploadUserAttributes manages the attributes file that KVStoreProvider syncs from, through the
@@ -38,9 +68,9 @@ const MAX_FILE_BYES = 10 * 1024 * 1024;
 export default function UploadUserAttributes({id, disabled = false}: Props) {
     const [pendingFile, setPendingFile] = useState<ChosenFile | null>(null);
 
-    // null until the exists check comes back, so the UI does not claim there is no file before
+    // null until the status check comes back, so the UI does not claim there is no file before
     // it has actually asked.
-    const [serverHasFile, setServerHasFile] = useState<boolean | null>(null);
+    const [serverFileStatus, setServerFileStatus] = useState<FileStatus | null>(null);
 
     // A single in-flight action at a time, which drives both the button labels and their
     // disabled state. Prevents, for example, deleting while an upload is still running.
@@ -53,6 +83,7 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
     const inputRef = useRef<HTMLInputElement>(null);
 
     // Every action also waits for the current one to finish, so a second click cannot race it.
+    const serverHasFile = serverFileStatus?.exists ?? false;
     const canUpload = pendingFile !== null && status === 'idle' && !disabled;
     const canDownload = serverHasFile && status === 'idle' && !disabled;
     const canDelete = serverHasFile && status === 'idle' && !disabled;
@@ -111,12 +142,12 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
                 Client4.getOptions({method: 'POST', body: pendingFile.file}), //getOptions() provides CSRF Token for POST
             );
 
+            const body = await response.json().catch(() => ({}));
             if (!response.ok) {
-                const body = await response.json().catch(() => ({}));
                 throw new Error(body.error ?? `Upload failed (${response.status})`);
             }
 
-            setServerHasFile(true);
+            setServerFileStatus(parseFileStatus(body));
             setPendingFile(null);
             if (inputRef.current) {
                 inputRef.current.value = '';
@@ -176,7 +207,7 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
                 throw new Error(`Delete failed (${response.status})`);
             }
 
-            setServerHasFile(false);
+            setServerFileStatus({exists: false, lastUpdated: null});
             setSuccess('File Deleted');
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Delete failed');
@@ -185,14 +216,13 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
         }
     }
 
-    // Asks whether a file is already stored, so Download and Delete are only offered when there is
-    // something to act on. A failure is left silent: the buttons stay disabled, which is the same
-    // outcome as having no file, and an error here says nothing about the admin's own action.
     async function checkServerFileStatus() {
-        const response = await fetch(`/plugins/${manifest.id}/user_attributes/exists`);
+        const response = await fetch(`/plugins/${manifest.id}/user_attributes/status`);
+        const body = await response.json().catch(() => ({}));
         if (response.ok) {
-            const body = await response.json();
-            setServerHasFile(Boolean(body.exists));
+            setServerFileStatus(parseFileStatus(body));
+        } else {
+            setError(body.error ?? 'Failed to retrieve server file status');
         }
     }
 
@@ -207,8 +237,8 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
         >
             <section className='UserAttrSync__section'>
                 <h5 className='UserAttrSync__heading'>{'Current file status'}</h5>
+                <p className='UserAttrSync__status'>{describeFileStatus(serverFileStatus)}</p>
                 <div className='UserAttrSync__row'>
-                    <span>{serverHasFile ? 'File detected' : 'No file on server'}</span>
                     <button
                         type='button'
                         className='btn btn-tertiary'
