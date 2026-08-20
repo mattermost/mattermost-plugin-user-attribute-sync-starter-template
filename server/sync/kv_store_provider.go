@@ -43,7 +43,6 @@ func NewKVStoreProvider(client *pluginapi.Client) *KVStoreProvider {
 //   - If newer: reads and returns the updated user data
 //   - If unchanged: returns an empty array to signal no new data
 func (f *KVStoreProvider) GetUserAttributes() ([]map[string]interface{}, error) {
-
 	// No need to process users again if the file has not been changed since the last run
 	var rawTime []byte
 	if err := f.client.KV.Get(UserAttrsLastUpdatedKey, &rawTime); err != nil {

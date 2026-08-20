@@ -87,7 +87,7 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 	// handles them one at a time: unknown fields, unsupported types, unmatched emails and failed
 	// writes each log a warning and move on to the next record.
 	var userAttrs []map[string]interface{}
-	if err := json.Unmarshal(raw, &userAttrs); err != nil {
+	if err = json.Unmarshal(raw, &userAttrs); err != nil {
 		p.errorWithJSON(w, http.StatusBadRequest, "invalid json - must be array of objects")
 		return
 	}

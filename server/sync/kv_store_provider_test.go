@@ -26,7 +26,7 @@ func newTestKVStoreProvider(t *testing.T) (*KVStoreProvider, *plugintest.API) {
 func TestKVStoreProvider_ReturnsStoredUsers(t *testing.T) {
 	provider, api := newTestKVStoreProvider(t)
 
-	//Fresh provider starts with a 0 lastSyncTime, so by setting lastUpdatedTime to now should trigger a new run.
+	// Fresh provider starts with a 0 lastSyncTime, so by setting lastUpdatedTime to now() should trigger a new run.
 	rawTime, _ := time.Now().MarshalJSON()
 	api.On("KVGet", UserAttrsLastUpdatedKey).Return(rawTime, nil).Once()
 
@@ -98,7 +98,7 @@ func TestKVStoreProvider_DoesNotProcessTwice(t *testing.T) {
 
 	users, err = provider.GetUserAttributes()
 	require.NoError(t, err)
-	assert.Empty(t, users, "no data should be returned for a subsquent call")
+	assert.Empty(t, users, "no data should be returned for a subsequent call")
 }
 
 // TestKVStoreProvider_InvalidJSON tests error handling for malformed stored data
