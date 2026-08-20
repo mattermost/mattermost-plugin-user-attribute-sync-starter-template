@@ -55,7 +55,7 @@ func mockLogs(api *plugintest.API) {
 	}
 }
 
-// asSysadmin lets userID through the manage_system check every handler starts with.
+// asSysadmin lets userID through the requireSysadmin middleware.
 func asSysadmin(api *plugintest.API, userID string) {
 	api.On("HasPermissionTo", userID, model.PermissionManageSystem).Return(true).Once()
 }
@@ -91,8 +91,10 @@ func requireErrorResponse(t *testing.T, resp *http.Response, statusCode int, mes
 	require.Equal(t, message, body.Error)
 }
 
-// TestUserAttributesAccessControl covers the two rejection paths every endpoint
-// shares, so the individual handler tests below can assume an authorized admin.
+// TestUserAttributesAccessControl covers the two rejection paths the requireSysadmin middleware
+// applies to every endpoint, so the individual handler tests below can assume an authorized admin.
+// Driving each method and path proves the middleware is actually reached by all of them, which is
+// the property that replaced a per-handler check.
 func TestUserAttributesAccessControl(t *testing.T) {
 	endpoints := []struct {
 		name   string

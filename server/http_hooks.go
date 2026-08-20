@@ -34,10 +34,14 @@ func (p *Plugin) ServeHTTP(c *plugin.Context, w http.ResponseWriter, r *http.Req
 // rather than installing a file on the server's filesystem, which is what KVStoreProvider reads.
 // They are only useful with that provider selected; FileProvider ignores the KV store entirely.
 //
-// There is no router-level middleware, so every handler is individually responsible for calling
-// checkSysAadmin. A new route that forgets to is publicly reachable.
+// Every route is behind requireSysadmin, applied once here as middleware rather than repeated in
+// each handler, so a route added later cannot accidentally be left unauthenticated. Note this
+// makes the whole router admin-only: a genuinely public route (a webhook, an OAuth callback)
+// cannot simply be added below — if desired, move the protected routes onto a subrouter instead
+// and apply Use there.
 func (p *Plugin) initializeAPI() {
 	router := mux.NewRouter()
+	router.Use(p.requireSysadmin)
 
 	router.HandleFunc("/user_attributes", p.handleUploadUserAttributes).Methods("POST")
 	router.HandleFunc("/user_attributes", p.handleDownloadUserAttributes).Methods("GET")
@@ -55,11 +59,6 @@ func (p *Plugin) initializeAPI() {
 // even if the timestamp write fails, because the alternative is telling the admin the upload
 // failed when their data is in fact stored.
 func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Request) {
-
-	if !p.checkSysAadmin(w, r) {
-		return
-	}
-
 	// Cap the body before reading it, so an oversized upload cannot exhaust memory
 	r.Body = http.MaxBytesReader(w, r.Body, maxFileSizeBytes)
 	raw, err := io.ReadAll(r.Body)
@@ -125,10 +124,6 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 // exactly what the plugin is syncing. This is the one handler that does not respond with the JSON
 // envelope, because the body is the file itself.
 func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Request) {
-	if !p.checkSysAadmin(w, r) {
-		return
-	}
-
 	var userAttrs []byte
 	if err := p.client.KV.Get(sync.UserAttrsStoreKey, &userAttrs); err != nil {
 		p.client.Log.Error("failed to retrieve userAttrs", "err", err)
@@ -153,10 +148,6 @@ func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Req
 // The settings UI calls this on load to decide whether to offer Download and Delete, which it
 // could not do from the download endpoint without pulling the whole file down.
 func (p *Plugin) handleUserAttributesExist(w http.ResponseWriter, r *http.Request) {
-	if !p.checkSysAadmin(w, r) {
-		return
-	}
-
 	var userAttrs []byte
 	if err := p.client.KV.Get(sync.UserAttrsStoreKey, &userAttrs); err != nil {
 		p.client.Log.Error("failed to retrieve userAttrs", "err", err)
@@ -174,10 +165,6 @@ func (p *Plugin) handleUserAttributesExist(w http.ResponseWriter, r *http.Reques
 // which it reports as an error on every subsequent sync until a replacement is uploaded; both keys
 // are removed together so that error names the right cause.
 func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Request) {
-	if !p.checkSysAadmin(w, r) {
-		return
-	}
-
 	if err := p.client.KV.Delete(sync.UserAttrsStoreKey); err != nil {
 		p.errorWithJSON(w, http.StatusForbidden, "failed to delete file")
 		return
@@ -192,28 +179,32 @@ func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusOK)
 }
 
-// checkSysAadmin restricts a request to system admins, writing the error response itself and
-// returning false when the caller should stop. Every handler has to call it first — see
-// initializeAPI on why there is no middleware doing this centrally.
+// requireSysadmin is middleware that restricts every route on the router to system admins,
+// responding itself and not calling through when the request should be refused.
 //
 // These endpoints read and overwrite the data that feeds every user's attributes, and attributes
 // can gate channel access through ABAC policies, so system-admin is the right bar rather than
 // merely "logged in".
-func (p *Plugin) checkSysAadmin(w http.ResponseWriter, r *http.Request) bool {
-	// This is the only header that is trusted; it is set by the Mattermost server on the way in.
-	userID := r.Header.Get("Mattermost-User-Id")
-	if userID == "" {
-		p.errorWithJSON(w, http.StatusUnauthorized, "not logged in")
-		return false
-	}
+//
+// Note gorilla/mux only runs middleware once a route matches, so requests to unknown paths are
+// answered with 404 without reaching this check.
+func (p *Plugin) requireSysadmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// This is the only header that is trusted; it is set by the Mattermost server on the way in.
+		userID := r.Header.Get("Mattermost-User-Id")
+		if userID == "" {
+			p.errorWithJSON(w, http.StatusUnauthorized, "not logged in")
+			return
+		}
 
-	// Access is locked down to a sysadmin
-	if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
-		p.errorWithJSON(w, http.StatusForbidden, "not authorized")
-		return false
-	}
+		// Access is locked down to a sysadmin
+		if !p.client.User.HasPermissionTo(userID, model.PermissionManageSystem) {
+			p.errorWithJSON(w, http.StatusForbidden, "not authorized")
+			return
+		}
 
-	return true
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (p *Plugin) errorWithJSON(w http.ResponseWriter, responseCode int, errMessage string) {
