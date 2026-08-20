@@ -248,9 +248,17 @@ cd e2e && npm test -- -g 'renders both attribute provider'  # by title
 - `http_hooks_test.go` drives handlers through `p.ServeHTTP` with `httptest`, the same way the server does, rather than calling handler functions directly — so route registration and the permission check are covered too. It sets the `Mattermost-User-Id` header to simulate an authenticated request and mocks `HasPermissionTo` to control authorization.
 - `configuration_test.go` covers `NewAttributeProvider()`, including that it closes the previous provider (via a local `closeRecorder` stub) and panics on an unknown value.
 
-**Webapp tests** (`webapp/src/*.test.tsx`):
-- Framework: Jest + Enzyme
-- Currently minimal (manifest test, React fragment test) — **the new components have no unit tests**; their behaviour is covered end-to-end in `e2e/` instead.
+**Webapp tests** (`webapp/src/**/*.test.tsx`):
+- Framework: **Jest 29 + React Testing Library**, matching the majority of Mattermost plugins (calls, github, gitlab, jira, zoom). Query by role, assert on what the admin can see and do; `@testing-library/jest-dom` matchers are registered globally in `tests/setup.tsx`.
+- **RTL is pinned to 12.1.5, and cannot be upgraded while this plugin is on React 17.** RTL 13+ declares `peerDependencies: react >=18`. Every RTL-using Mattermost plugin is on React 18 and therefore on RTL 14.x — do not copy their pin without moving React first.
+- Enzyme was removed (`enzyme`, `@types/enzyme`, `enzyme-adapter-react-17-updated`, `enzyme-to-json`). It had been an unconfigured devDependency since the initial commit, inherited from an older generation of the upstream starter template, which has since dropped it too. The `snapshotSerializers` entry went with it.
+- **Two jest resolution problems had to be solved before any component test could run**, and both are worth understanding before adding tests:
+  - `mattermost-redux` (and `@mattermost/client` beneath it) expose subpaths via the `exports` field. Jest 27 predates `exports` support, so `mattermost-redux/client` was unresolvable and *nothing* importing `Client4` could be tested. **Upgrading to jest 29 fixed this natively** — no `moduleNameMapper` needed, which is why the other plugins' configs have no entry for it. This is what jest 27 was costing.
+  - `react-bootstrap` is a **webpack external** — the host webapp supplies it at runtime, so it is deliberately not installed and jest cannot resolve it. `tests/react_bootstrap_mock.tsx` stands in for it via `moduleNameMapper`, implementing only the `Modal` surface `confirm_modal.tsx` uses. Any future external in `webpack.config.js` that is not also a real dependency needs the same treatment.
+  - **Installing react-bootstrap as a devDependency instead was tried and rejected**, and not for bundle-size reasons — `externals` excludes it by configuration, so an install would cost the bundle nothing. It was rejected because (a) Mattermost's webapp uses its own fork, `github:mattermost/react-bootstrap#05559f4c`, so an upstream install would test against a different library than production; and (b) upstream `0.32.4` — the line matching that fork and the pinned `@types/react-bootstrap@0.32.37` — declares `peer react: >=15.3.0`, which npm satisfies with react-dom 19 and then fails against react 17. `--legacy-peer-deps` does install it, but removes `react-dom` from the tree and breaks RTL; the alternative is an `overrides` pin, i.e. exactly the cruft removed with enzyme. The real Modal is covered in `e2e/` against the host's actual fork.
+- `attribute_provider.test.tsx` renders the **real** component tree, so the assertions are behavioural rather than prop-level. The mount-time `/user_attributes/exists` request is stubbed with a `fetch` mock; `renderSetting` awaits an `act()` flush so the resulting state update does not land after the test ends.
+- The `setByEnv` case is a regression test, and it was **verified by reintroducing the bug and watching it fail**. Do the same for any regression test added here — an earlier prop-level version of this test passed even with the bug present, because the defect was in the child's own `disabled || setByEnv`.
+- `react_fragment.test.tsx` was deleted: it asserted `React.version === '17.0.2'`, so it tested nothing about this plugin while guaranteeing a failure on any React upgrade. `manifest.test.tsx` is kept as a smoke test that manifest generation ran.
 
 **E2E tests** (`e2e/tests/*.spec.ts`):
 - Framework: Playwright, `workers: 1`, no server started for you
@@ -293,6 +301,6 @@ Plugin hooks implemented: `OnActivate`, `OnDeactivate`, `OnConfigurationChange`,
 
 **Node:**
 - React 17, Redux, mattermost-redux, @mattermost/types
-- `react-bootstrap` — used only by `confirm_modal.tsx`. It is a **webpack external** (`webpack.config.js` maps it to the host's `ReactBootstrap` global, like `react` and `redux`), so it is not installed and must not be added to `dependencies`; only `@types/react-bootstrap` is a devDependency, and it exists purely so `tsc` can resolve the import
+- `react-bootstrap` — used only by `confirm_modal.tsx`. It is a **webpack external** (`webpack.config.js` maps it to the host's `ReactBootstrap` global, like `react` and `redux`), so it is not installed; only `@types/react-bootstrap` is a devDependency, and it exists purely so `tsc` can resolve the import. Adding the real package would not change the bundle, but see the testing notes above for why it is still not worth doing
 - Webpack, Babel, TypeScript, ESLint, Jest
 - `e2e/` has its own tree: `@playwright/test`, TypeScript, ESLint + `@typescript-eslint`
