@@ -56,7 +56,7 @@ func (f *FileProvider) GetUserAttributes() ([]map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to parse JSON from %s: %w", f.filePath, err)
 	}
 
-	// Update tracking st
+	// Update tracking state
 	f.lastReadTime = time.Now()
 	f.lastModTime = modTime
 
