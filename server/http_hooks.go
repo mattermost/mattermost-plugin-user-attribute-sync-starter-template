@@ -87,7 +87,7 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 	// handles them one at a time: unknown fields, unsupported types, unmatched emails and failed
 	// writes each log a warning and move on to the next record.
 	var userAttrs []map[string]interface{}
-	if err = json.Unmarshal(raw, &userAttrs); err != nil {
+	if err = json.Unmarshal(raw, &userAttrs); err != nil || userAttrs == nil || len(userAttrs) == 0 {
 		p.errorWithJSON(w, http.StatusBadRequest, "invalid json - must be array of objects")
 		return
 	}
@@ -179,7 +179,7 @@ func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Reque
 	if err := p.client.KV.Delete(sync.UserAttrsLastUpdatedKey); err != nil {
 		// no early error return, timestamp deletion is best effort so we can still report the file was deleted.
 		// just log an error instead.
-		p.client.Log.Error("failed to delete file timestamp after file deletion: %w", err)
+		p.client.Log.Error("failed to delete file timestamp after file deletion", "err", err)
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -248,11 +248,11 @@ func (p *Plugin) requireSysadmin(next http.Handler) http.Handler {
 }
 
 func (p *Plugin) errorWithJSON(w http.ResponseWriter, responseCode int, errMessage string) {
-	w.WriteHeader(responseCode)
 	responseBody := map[string]any{
 		"error": errMessage,
 	}
 	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(responseCode)
 	responseJSON, _ := json.Marshal(responseBody)
 	if _, err := w.Write(responseJSON); err != nil {
 		p.API.LogError("Failed to write error response", "err", err.Error(), "body", responseJSON)
@@ -260,14 +260,14 @@ func (p *Plugin) errorWithJSON(w http.ResponseWriter, responseCode int, errMessa
 }
 
 func (p *Plugin) responseWithJSON(w http.ResponseWriter, responseCode int, responseBody any) {
-	w.WriteHeader(responseCode)
-	w.Header().Add("Content-Type", "application/json")
 	responseJSON, err := json.Marshal(responseBody)
 	if err != nil {
 		p.API.LogError("Failed to write response", "err", err.Error())
 		p.errorWithJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(responseCode)
 	if _, err := w.Write(responseJSON); err != nil {
 		p.API.LogError("Failed to write response", "err", err.Error(), "body", responseJSON)
 	}

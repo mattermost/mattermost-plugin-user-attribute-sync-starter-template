@@ -209,6 +209,16 @@ func TestHandleUploadUserAttributes(t *testing.T) {
 			fmt.Sprintf("file exceeds %d byte limit", maxFileSizeBytes))
 	})
 
+	t.Run("rejects null json files", func(t *testing.T) {
+		p, api := newTestPlugin(t)
+
+		userID := model.NewId()
+		asSysadmin(api, userID)
+
+		resp := doRequest(t, p, http.MethodPost, "/user_attributes", userID, []byte(`null`))
+		requireErrorResponse(t, resp, http.StatusBadRequest, "invalid json - must be array of objects")
+	})
+
 	t.Run("reports a failed write", func(t *testing.T) {
 		p, api := newTestPlugin(t)
 
