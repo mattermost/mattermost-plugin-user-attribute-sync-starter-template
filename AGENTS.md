@@ -18,10 +18,10 @@ It ships **two example data sources**, selected by an admin at runtime: `FilePro
 Plugin Activation (Once)
   ├─> Register HTTP routes (mux router on ServeHTTP)
   ├─> Create/Update User Attribute Fields (schema)
-  ├─> Construct the configured AttributeProvider
   └─> Start Background Job (cluster-aware)
 
 Background Job (Configurable interval, default 60min)
+  ├─> Construct the configured AttributeProvider, if the setting changed
   ├─> Fetch Changed Values From The Configured Provider
   │     ├── FileProvider     — reads <mattermost>/data/user_attributes.json
   │     └── KVStoreProvider  — reads the plugin KV store
@@ -48,10 +48,10 @@ All fields and values are stored in the `access_control` property group (`model.
 
 | File | Role |
 |------|------|
-| `server/plugin.go` | Plugin struct, OnActivate/OnDeactivate lifecycle hooks. Initializes the API router, field sync, provider, and background job. |
+| `server/plugin.go` | Plugin struct, OnActivate/OnDeactivate lifecycle hooks. Initializes the API router, field sync, and background job. |
 | `server/http_hooks.go` | `ServeHTTP` + `initializeAPI()`. The `gorilla/mux` router and the four `/user_attributes` handlers, the sysadmin permission check, and the JSON response helpers. |
-| `server/job.go` | Cluster-aware job scheduling via `cluster.Schedule()`. Contains `nextWaitInterval()` (calculates delay) and `runSync()` (executes sync via `p.attributeProvider`). |
-| `server/configuration.go` | Thread-safe config management with RWMutex. Settings: `SyncIntervalMinutes` (default 60) and `AttributeProvider`. Also holds `NewAttributeProvider()`, the provider factory/switch. |
+| `server/job.go` | Cluster-aware job scheduling via `cluster.Schedule()`. Contains `nextWaitInterval()` (calculates delay), `runSync()` (executes the sync), and the provider lifecycle: `ensureAttributeProvider()` and the `newAttributeProvider()` factory/switch. |
+| `server/configuration.go` | Thread-safe config management with RWMutex. Settings: `SyncIntervalMinutes` (default 60) and `AttributeProvider`, plus the `ConfigAttributeProvider*` constants naming its accepted values. |
 | `server/sync/provider.go` | `AttributeProvider` interface: `GetUserAttributes() ([]map[string]interface{}, error)` and `Close() error`. |
 | `server/sync/field_sync.go` | Field definitions array and schema management. Creates/updates user attribute fields. Maintains `FieldIDCache` mapping external names to Mattermost-generated IDs. |
 | `server/sync/value_sync.go` | `SyncUsers()` — matches users by email, builds PropertyValue objects, bulk upserts. Handles text, date, multiselect, and rank value types. |
@@ -119,8 +119,8 @@ These fields are examples, and should be adapted to the developer's use case.
 ## Data Flow
 
 1. `OnActivate()` calls `initializeAPI()` to build the HTTP router, then `SyncFields()`, which creates/updates field schema and returns a `FieldIDCache`
-2. `OnActivate()` calls `NewAttributeProvider()` to construct the configured provider and starts a `cluster.Job`
-3. On each job tick, `runSync()` calls `p.attributeProvider.GetUserAttributes()` → `SyncUsers()`
+2. `OnActivate()` starts a `cluster.Job`
+3. On each job tick, `runSync()` calls `ensureAttributeProvider()` to build or replace the provider, then `GetUserAttributes()` → `SyncUsers()`
 4. `SyncUsers()` iterates users, looks up each by email, calls `buildPropertyValues()` to create `PropertyValue` objects, then bulk upserts via `Property.UpsertPropertyValues()`
 5. For fields with options (select, multiselect, rank), option names are translated to option IDs using `FieldIDCache`
 
@@ -140,8 +140,9 @@ These fields are examples, and should be adapted to the developer's use case.
 
 **Provider selection:**
 
-- `NewAttributeProvider()` in `server/configuration.go` is the switch on the `AttributeProvider` setting. It closes the previous provider before returning the new one, and **panics on an unrecognized value** — adding a provider means adding both a `Config...` constant and a `case`.
-- It is called from two places: `setConfiguration()` (so changing the setting swaps the live provider without a restart) and `OnActivate()`. `setConfiguration()` runs while holding `configurationLock`, which is why `NewAttributeProvider()` reads `p.configuration` directly rather than calling `getConfiguration()` — using the accessor there would deadlock.
+- `newAttributeProvider()` in `server/job.go` is the switch on the `AttributeProvider` setting. It **panics on an unrecognized value** — adding a provider means adding both a `Config...` constant and a `case`.
+- `ensureAttributeProvider()` decides when to call it, comparing the setting against `attributeProviderKind` (what the live provider was built from) and closing the old provider before replacing it. `runSync()` is its only caller, which is the point: the goroutine that fetches from a provider is also the one that opens and closes it, so neither field needs a lock and no provider has to be safe to close during a fetch. Nothing else may touch `p.attributeProvider` while the job is scheduled — `OnActivate()` builds none, and `OnDeactivate()` closes it only after `backgroundJob.Close()` has waited for a running sync.
+- Consequently, changing the setting takes effect on the next sync tick rather than the moment it is saved.
 - The webapp radio values, the Go constants, and `plugin.json`'s `default` all have to agree on the literal strings `FileProvider` and `KVStore`. Four places encode them: `ConfigAttributeProvider*` in `server/configuration.go`, the `Provider` union in `attribute_provider.tsx`, `plugin.json`, and `e2e/constants.ts`.
 - Mattermost lowercases plugin setting keys in the stored config, so the setting reads as `attributeprovider` over `/api/v4/config` even though `plugin.json` declares `AttributeProvider`. The e2e helpers rely on this.
 
@@ -168,7 +169,7 @@ Things to preserve when changing these:
 `plugin.json` declares `AttributeProvider` as `"type": "custom"`, which tells the System Console to render a webapp-supplied component instead of a built-in control. `index.tsx` supplies it via `registry.registerAdminConsoleCustomSetting`.
 
 - The console passes considerably more props than this component declares (`label`, `helpText`, `config`, `license`, `registerSaveAction`, `setSaveNeeded`, `showConfirm`, …). `attribute_provider.tsx` deliberately takes only `id`, `value`, `onChange`, `disabled`, and `setByEnv`; the rest are available if a future version needs them (see `schema_admin_settings.tsx`'s `buildCustomSetting` in the server repo).
-- `onChange(id, value)` is what marks the setting dirty. The console still owns the Save button, so **provider changes only take effect once the admin saves**, which is what triggers `OnConfigurationChange` → `setConfiguration` → provider swap. The upload/download/delete buttons are the exception: they hit the plugin API directly and take effect immediately, with no Save.
+- `onChange(id, value)` is what marks the setting dirty. The console still owns the Save button, so **provider changes only take effect once the admin saves**, which is what triggers `OnConfigurationChange` → `setConfiguration`, and the swap itself on the next sync. The upload/download/delete buttons are the exception: they hit the plugin API directly and take effect immediately, with no Save.
 - **`setByEnv` applies to the radios, not to the file controls.** It means the *setting* is pinned by an environment variable, which is a reason not to let an admin pick a different source (matching the console's own `RadioSetting`, which does `disabled || setByEnv`). It says nothing about the stored file: that lives in the KV store, and no environment variable can put it there. Pinning the source to `KVStore` is in fact the case where uploading is the only way to give the plugin data, so `AttributeProvider` deliberately does not pass `setByEnv` down to `UploadUserAttributes`. `disabled` — plugin off, or a read-only admin — does gate both.
 - Because `showTitle: true` is passed at registration, the console wraps the component in its own `Setting` (rendering `display_name` as the label and `help_text` beneath it). The `help_text` was dropped from `plugin.json` because the component's "Source Details" panel already explains each option; add it back rather than duplicating text if that changes.
 - If the plugin is disabled, the webapp component is not registered, and the console renders a warning banner ("In order to view this setting, enable the plugin and click Save") in place of the setting. A blank-looking setting usually means the bundle failed to load, not that the component is broken.
@@ -181,7 +182,7 @@ Add an entry to `fieldDefinitions` in `server/sync/field_sync.go`. Restart plugi
 ### Custom data source
 Write code to implement the `AttributeProvider` interface (two methods: `GetUserAttributes`, `Close`). `FileProvider` and `KVStoreProvider` are the two worked examples — copy whichever is closer.
 
-**The expected path for a developer adapting this template is to delete both example providers and the selection machinery, and construct their single real provider directly in `OnActivate()`.** The `AttributeProvider` setting exists so the template can demonstrate two sources side by side, not because the interface requires a choice. Runtime selection remains available if a real deployment genuinely needs it — e.g. differing sources per environment, or a migration between sources — and in that case four places have to agree on the same literal string: a `ConfigAttributeProvider*` constant and a `case` in `NewAttributeProvider()` (`server/configuration.go`), the `Provider` union and a radio in `attribute_provider.tsx`, and the values in `e2e/constants.ts`. Miss the `case` and `NewAttributeProvider()` panics; miss the radio and the value is unreachable from the console.
+**The expected path for a developer adapting this template is to delete both example providers and the selection machinery, and construct their single real provider directly in `OnActivate()`.** The `AttributeProvider` setting exists so the template can demonstrate two sources side by side, not because the interface requires a choice. Runtime selection remains available if a real deployment genuinely needs it — e.g. differing sources per environment, or a migration between sources — and in that case four places have to agree on the same literal string: a `ConfigAttributeProvider*` constant (`server/configuration.go`) and a `case` in `newAttributeProvider()` (`server/job.go`), the `Provider` union and a radio in `attribute_provider.tsx`, and the values in `e2e/constants.ts`. Miss the `case` and `newAttributeProvider()` panics; miss the radio and the value is unreachable from the console.
 
 Whatever the source, `GetUserAttributes()` is expected to return an **empty slice when nothing has changed** — the job runs on a timer and `runSync()` returns early on an empty result. `FileProvider` decides this from file mtime, `KVStoreProvider` from a stored timestamp.
 
@@ -246,7 +247,7 @@ cd e2e && npm test -- -g 'renders both attribute provider'  # by title
 - Mock expectations with `.On()` and `.Return()`
 - Each file has a `newTest*` helper that builds the subject against a fresh `plugintest.API` and registers `t.Cleanup(func() { api.AssertExpectations(t) })`, so unmet expectations fail the test automatically. Follow that shape for new tests.
 - `http_hooks_test.go` drives handlers through `p.ServeHTTP` with `httptest`, the same way the server does, rather than calling handler functions directly — so route registration and the permission check are covered too. It sets the `Mattermost-User-Id` header to simulate an authenticated request and mocks `HasPermissionTo` to control authorization.
-- `configuration_test.go` covers `NewAttributeProvider()`, including that it closes the previous provider (via a local `closeRecorder` stub) and panics on an unknown value.
+- `job_test.go` covers the provider lifecycle: `newAttributeProvider()` panicking on an unknown value, and `ensureAttributeProvider()` building on first use, reusing while the setting is unchanged, and closing the previous provider when it changes (via a local `closeRecorder` stub).
 
 **Webapp tests** (`webapp/src/**/*.test.tsx`):
 - Framework: **Jest 29 + React Testing Library**, matching the majority of Mattermost plugins (calls, github, gitlab, jira, zoom). Query by role, assert on what the admin can see and do; `@testing-library/jest-dom` matchers are registered globally in `tests/setup.tsx`.

@@ -45,8 +45,7 @@ The sync itself is unchanged by which source is selected: both sources satisfy t
 - **Provider Interface** (`server/sync/provider.go`) - The contract every data source implements
 - **File Provider** (`server/sync/file_provider.go`) - Example JSON file-based data source
 - **KV Store Provider** (`server/sync/kv_store_provider.go`) - Example data source fed by admin upload
-- **Job Orchestrator** (`server/job.go`) - Cluster-aware periodic sync scheduler
-- **Provider Selection** (`server/configuration.go`) - Builds the configured source, and rebuilds it when the setting changes
+- **Job Orchestrator** (`server/job.go`) - Cluster-aware periodic sync scheduler, and the selection of the configured source
 - **HTTP API** (`server/http_hooks.go`) - Sysadmin-only endpoints for managing the uploaded file
 - **Settings UI** (`webapp/src/components/`) - The custom System Console setting that drives both of the above
 
@@ -269,9 +268,9 @@ The template ships two example providers, but the point of the interface is that
 
 3. **Handle incremental sync** by tracking state internally (e.g., last sync timestamp)
 
-**Expect to delete the source selector.** The `AttributeProvider` setting, the switch in `NewAttributeProvider` (`server/configuration.go`), and the radios in `webapp/src/components/attribute_provider.tsx` exist so this template can demonstrate two sources in one build. A real plugin usually has exactly one, and is simpler for saying so: construct it directly in `OnActivate` and remove the setting.
+**Expect to delete the source selector.** The `AttributeProvider` setting, the provider switch in `server/job.go`, and the radios in `webapp/src/components/attribute_provider.tsx` exist so this template can demonstrate two sources in one build. A real plugin usually has exactly one, and is simpler for saying so: construct it directly in `OnActivate` and remove the setting.
 
-If you do want a runtime choice — different sources per environment, or a migration from one to another — keep the switch, and note that the source name is spelled in four places that have to agree: the `ConfigAttributeProvider*` constants and the switch in `server/configuration.go`, the `Provider` type and radios in `attribute_provider.tsx`, the `default` in `plugin.json`, and the values in `e2e/constants.ts`. An unrecognized name panics on purpose, rather than quietly syncing nothing.
+If you do want a runtime choice — different sources per environment, or a migration from one to another — keep the switch, and note that the source name is spelled in five places that have to agree: the `ConfigAttributeProvider*` constants in `server/configuration.go`, the switch in `server/job.go`, the `Provider` type and radios in `attribute_provider.tsx`, the `default` in `plugin.json`, and the values in `e2e/constants.ts`. An unrecognized name panics on purpose, rather than quietly syncing nothing.
 
 Common provider implementations:
 - **REST API**: Poll external API for changed users since last sync
@@ -300,7 +299,7 @@ Common provider implementations:
 │   │   ├── file_provider.go      # File-based provider implementation
 │   │   └── kv_store_provider.go  # Upload-based provider implementation
 │   ├── plugin.go                 # Plugin lifecycle (OnActivate/OnDeactivate)
-│   ├── configuration.go          # Settings, and provider selection
+│   ├── configuration.go          # Settings
 │   ├── http_hooks.go             # Sysadmin-only API for the uploaded file
 │   └── job.go                    # Background job orchestration
 ├── webapp/src/

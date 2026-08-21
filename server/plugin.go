@@ -27,9 +27,13 @@ type Plugin struct {
 
 	// attributeProvider provides an example of syncing user attribute data from external source.
 	// there are two examples provided in this repo: FileProvider and KVStoreProvider.
-	// Which one is in use is decided by the AttributeProvider setting, so this is replaced
-	// whenever the configuration changes — see NewAttributeProvider in configuration.go.
+	// Which one is in use is decided by the AttributeProvider configuration.
+	//
+	// The sync job owns these two fields while it is scheduled, which is why neither is locked.
 	attributeProvider attrsync.AttributeProvider
+
+	// attributeProviderKind is the setting attributeProvider was built from.
+	attributeProviderKind string
 
 	// groupID is the ID of the Mattermost property group this plugin reads and writes.
 	// We use the "access_control" group because user attribute fields defined here can be
@@ -77,9 +81,8 @@ func (p *Plugin) OnActivate() error {
 	}
 	p.client.Log.Info("Field sync completed successfully")
 
-	// Initialize the configured attribute provider.
-	// Note: p.client must be initialized prior to this call, because KVStoreProvider needs it.
-	p.attributeProvider = p.NewAttributeProvider()
+	// Note: the attribute provider is built by the sync job on its first run, not here — see
+	// ensureAttributeProvider.
 
 	// Set up the attribute sync cluster job
 	// This job runs periodically to synchronize user attribute values from external
@@ -103,6 +106,11 @@ func (p *Plugin) OnActivate() error {
 // OnDeactivate is invoked when the plugin is deactivated.
 // Cleans up the attribute sync cluster job and the attribute provider to prevent orphaned
 // resources. The HTTP router needs no cleanup; the server stops routing to a deactivated plugin.
+//
+// The order is important: cluster.Job.Close blocks until a running sync returns, which is what
+// makes it safe to close the provider here.
+// The example Attribute Providers in this repo have no-ops for Close() but this pattern will
+// be safe for other providers that require it.
 func (p *Plugin) OnDeactivate() error {
 	if p.backgroundJob != nil {
 		if err := p.backgroundJob.Close(); err != nil {

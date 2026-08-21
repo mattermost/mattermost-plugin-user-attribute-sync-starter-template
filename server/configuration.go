@@ -3,7 +3,6 @@ package main
 import (
 	"reflect"
 
-	"github.com/mattermost/user-attribute-sync-starter-template/server/sync"
 	"github.com/pkg/errors"
 )
 
@@ -27,7 +26,6 @@ const (
 //
 // If you add non-reference types to your configuration struct, be sure to rewrite Clone as a deep
 // copy appropriate for your types.
-
 type configuration struct {
 	// SyncIntervalMinutes determines how often (in minutes) the plugin syncs user attributes
 	// from the external source. Must be at least 1 minute.
@@ -73,9 +71,6 @@ func (p *Plugin) getConfiguration() *configuration {
 // This method panics if setConfiguration is called with the existing configuration. This almost
 // certainly means that the configuration was modified without being cloned and may result in
 // an unsafe access.
-//
-// It also rebuilds the attribute provider, so changing the source in the System Console takes
-// effect without restarting the plugin.
 func (p *Plugin) setConfiguration(configuration *configuration) {
 	p.configurationLock.Lock()
 	defer p.configurationLock.Unlock()
@@ -92,34 +87,6 @@ func (p *Plugin) setConfiguration(configuration *configuration) {
 	}
 
 	p.configuration = configuration
-	p.attributeProvider = p.NewAttributeProvider()
-}
-
-// NewAttributeProvider constructs the data source named by the current configuration, closing
-// whichever provider was in use before so its resources are not leaked.
-//
-// It reads p.configuration directly rather than calling getConfiguration(), because
-// setConfiguration calls it while already holding configurationLock and RWMutex is not reentrant.
-//
-// It panics on an unrecognized value: the setting is constrained to the ConfigAttributeProvider*
-// values by the System Console, so anything else means the switch and the constants have drifted
-// apart, and syncing nothing silently would be worse than failing loudly.
-//
-// A plugin adapted from this template would usually drop this switch and construct its one real
-// provider in OnActivate instead.
-func (p *Plugin) NewAttributeProvider() sync.AttributeProvider {
-	if p.attributeProvider != nil {
-		p.attributeProvider.Close()
-	}
-
-	switch p.configuration.AttributeProvider {
-	case ConfigAttributeProviderFile:
-		return sync.NewFileProvider()
-	case ConfigAttributeProviderKVStore:
-		return sync.NewKVStoreProvider(p.client)
-	default:
-		panic("unrecognized Attribute Provider")
-	}
 }
 
 // OnConfigurationChange is invoked when configuration changes may have been made.
