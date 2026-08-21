@@ -218,8 +218,7 @@ func (p *Plugin) errorWithJSON(w http.ResponseWriter, responseCode int, errMessa
 func (p *Plugin) responseWithJSON(w http.ResponseWriter, responseCode int, responseBody any) {
 	responseJSON, err := json.Marshal(responseBody)
 	if err != nil {
-		p.API.LogError("Failed to write response", "err", err.Error())
-		p.errorWithJSON(w, http.StatusInternalServerError, err.Error())
+		p.client.Log.Error("Failed to write response", "err", err.Error())
 		return
 	}
 	w.Header().Add("Content-Type", "application/json")
