@@ -110,7 +110,7 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
             // are not validated here — the server does not either, and unrecognized fields or
             // unmatched emails surface as warnings in the plugin logs during the next sync.
             const parsed: unknown = JSON.parse(text);
-            if (!Array.isArray(parsed) ||
+            if (!Array.isArray(parsed) || parsed.length === 0 ||
                 parsed.some((r) => typeof r !== 'object' || r === null || Array.isArray(r))) {
                 throw new Error('File must be a JSON array of objects');
             }
