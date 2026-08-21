@@ -51,9 +51,9 @@ func ReadStoredUserAttrs(client *pluginapi.Client) (StoredUserAttrs, error) {
 type KVStoreProvider struct {
 	client *pluginapi.Client
 
-	// lastSynced is when this provider last read the stored file. It is in-memory only, so a
+	// lastTimestampSynced is the latest file timestamp that was processed. It is in-memory only, so a
 	// plugin restart re-syncs the stored file once.
-	lastSynced time.Time
+	lastTimestampSynced time.Time
 }
 
 func NewKVStoreProvider(client *pluginapi.Client) *KVStoreProvider {
@@ -69,8 +69,8 @@ func NewKVStoreProvider(client *pluginapi.Client) *KVStoreProvider {
 //   - If unchanged: returns an empty array to signal no new data
 func (f *KVStoreProvider) GetUserAttributes() ([]map[string]interface{}, error) {
 	// One read gets the file and the timestamp together, so the file is fetched even when it turns
-	// out to be unchanged. Keeping it all in one key keeps key management simple, for very large files
-	// read frequently, this can be broken out into separate keys if necessary.
+	// out to be unchanged. Keeping it all in one key keeps key management simple; to support very
+	// large files read frequently, this can be broken out into separate keys if necessary.
 	stored, err := ReadStoredUserAttrs(f.client)
 	if err != nil {
 		return nil, err
@@ -82,12 +82,13 @@ func (f *KVStoreProvider) GetUserAttributes() ([]map[string]interface{}, error) 
 	}
 
 	// Nothing new since the last read, so there is no work to do
-	if stored.LastUpdated.IsZero() || stored.LastUpdated.Before(f.lastSynced) {
+	// Note we are checking if the stored file is before OR equal to the last sync, hence the !After call.
+	if stored.LastUpdated.IsZero() || !stored.LastUpdated.After(f.lastTimestampSynced) {
 		return []map[string]interface{}{}, nil
 	}
 
 	// Update the sync after a successful read but before validation so we dont keep reading an invalid file
-	f.lastSynced = time.Now()
+	f.lastTimestampSynced = stored.LastUpdated
 
 	// Parse JSON
 	var users []map[string]interface{}
