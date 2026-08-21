@@ -74,7 +74,8 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
 
     // A single in-flight action at a time, which drives both the button labels and their
     // disabled state. Prevents, for example, deleting while an upload is still running.
-    const [status, setStatus] = useState<'idle' | 'downloading' | 'uploading' | 'deleting'>('idle');
+    // Initialized to page_load and cleared when the initial file status check completes.
+    const [status, setStatus] = useState<'init' | 'idle' | 'downloading' | 'uploading' | 'deleting'>('init');
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -217,12 +218,19 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
     }
 
     async function checkServerFileStatus() {
-        const response = await fetch(`/plugins/${manifest.id}/user_attributes/status`);
-        const body = await response.json().catch(() => ({}));
-        if (response.ok) {
+        // this is only called on mount, with status state initialized to 'init' above.
+        // if that changes this should get its own status similar to the other calls.
+        try {
+            const response = await fetch(`/plugins/${manifest.id}/user_attributes/status`);
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.error ?? `File status check failed (${response.status})`);
+            }
             setServerFileStatus(parseFileStatus(body));
-        } else {
-            setError(body.error ?? 'Failed to retrieve server file status');
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'File status check failed');
+        } finally {
+            setStatus('idle');
         }
     }
 
