@@ -8,13 +8,38 @@ import (
 	"github.com/mattermost/mattermost/server/public/pluginapi"
 )
 
-// The two KV keys this provider reads. They are written by the HTTP handlers in
-// server/http_hooks.go and are a matched pair: the file is the data, and the timestamp is what
-// tells this provider the data is new. Writing or removing one without the other leaves a file
-// that is never synced, or a timestamp pointing at nothing — GetUserAttributes reports the latter
-// as an error rather than papering over it.
-const UserAttrsStoreKey = "user-attrs-file"
-const UserAttrsLastUpdatedKey = "user-attrs-last-updated"
+// UserAttrsStoreKey holds what the HTTP handlers in server/http_hooks.go uploaded: the file, and
+// the timestamp that tells this provider the file is new.
+const UserAttrsStoreKey = "user-attrs"
+
+// StoredUserAttrs is the value under UserAttrsStoreKey.
+//
+// Data is the file exactly as it was uploaded, so a download returns what the admin gave us.
+type StoredUserAttrs struct {
+	LastUpdated time.Time `json:"lastUpdated"`
+	Data        []byte    `json:"data"`
+}
+
+// ReadStoredUserAttrs reads the stored file and its timestamp.
+func ReadStoredUserAttrs(client *pluginapi.Client) (StoredUserAttrs, error) {
+	// Unmarshal here rather than letting KV.Get do it, so an unreachable store and a corrupt value
+	// are not reported as the same error.
+	var raw []byte
+	if err := client.KV.Get(UserAttrsStoreKey, &raw); err != nil {
+		return StoredUserAttrs{}, fmt.Errorf("failed to read %s from the KV store: %w", UserAttrsStoreKey, err)
+	}
+
+	if len(raw) == 0 {
+		return StoredUserAttrs{}, nil
+	}
+
+	var stored StoredUserAttrs
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return StoredUserAttrs{}, fmt.Errorf("malformed data in %s: %w", UserAttrsStoreKey, err)
+	}
+
+	return stored, nil
+}
 
 // KVStoreProvider implements AttributeProvider by reading user attribute data an admin uploaded
 // through the System Console, which the plugin stores in Mattermost's KV store.  THe KV Store lives in
@@ -43,47 +68,30 @@ func NewKVStoreProvider(client *pluginapi.Client) *KVStoreProvider {
 //   - If newer: reads and returns the updated user data
 //   - If unchanged: returns an empty array to signal no new data
 func (f *KVStoreProvider) GetUserAttributes() ([]map[string]interface{}, error) {
-	// No need to process users again if the file has not been changed since the last run
-	var rawTime []byte
-	if err := f.client.KV.Get(UserAttrsLastUpdatedKey, &rawTime); err != nil {
-		return nil, fmt.Errorf("failed to check lastUpdated timestamp: %w", err)
+	// One read gets the file and the timestamp together, so the file is fetched even when it turns
+	// out to be unchanged. Keeping it all in one key keeps key management simple, for very large files
+	// read frequently, this can be broken out into separate keys if necessary.
+	stored, err := ReadStoredUserAttrs(f.client)
+	if err != nil {
+		return nil, err
 	}
 
-	// An unset key means no file has ever been uploaded, or the last one was deleted. Checked
-	// explicitly because time.Time.UnmarshalJSON rejects empty input, and its error says nothing
-	// about the actual cause.
-	if len(rawTime) == 0 {
-		return nil, fmt.Errorf("no user attributes file in the KV store: %s is unset — upload one from the System Console", UserAttrsLastUpdatedKey)
+	// No file has ever been uploaded, or the last one was deleted
+	if len(stored.Data) == 0 {
+		return nil, fmt.Errorf("no user attributes file in the KV store: %s is unset — upload one from the System Console", UserAttrsStoreKey)
 	}
 
-	var lastUpdated time.Time
-	if err := lastUpdated.UnmarshalJSON(rawTime); err != nil {
-		return nil, fmt.Errorf("malformed data [%s]\nwhile checking lastUpdated timestamp: %w", rawTime, err)
-	}
 	// Nothing new since the last read, so there is no work to do
-	if lastUpdated.IsZero() || lastUpdated.Before(f.lastSynced) {
+	if stored.LastUpdated.IsZero() || stored.LastUpdated.Before(f.lastSynced) {
 		return []map[string]interface{}{}, nil
-	}
-
-	// Read the stored file
-	var data []byte
-	if err := f.client.KV.Get(UserAttrsStoreKey, &data); err != nil {
-		return nil, fmt.Errorf("failed to retrieve user attrs from store: %w", err)
 	}
 
 	// Update the sync after a successful read but before validation so we dont keep reading an invalid file
 	f.lastSynced = time.Now()
 
-	// A live timestamp with no data behind it means the two keys are out of step: something wrote
-	// or removed one without the other. There is nothing to sync either way, and unlike the
-	// unchanged case above it is not a state the plugin produces on its own.
-	if len(data) == 0 {
-		return nil, fmt.Errorf("no user attributes file in the KV store: %s is set but %s is empty", UserAttrsLastUpdatedKey, UserAttrsStoreKey)
-	}
-
 	// Parse JSON
 	var users []map[string]interface{}
-	if err := json.Unmarshal(data, &users); err != nil {
+	if err := json.Unmarshal(stored.Data, &users); err != nil {
 		return nil, fmt.Errorf("failed to parse JSON: %w", err)
 	}
 

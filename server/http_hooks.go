@@ -58,11 +58,6 @@ type userAttributesStatus struct {
 
 // handleUploadUserAttributes stores an uploaded attributes file in the KV store, where
 // KVStoreProvider will find it on the next sync.
-//
-// It writes two keys: the file itself, and a timestamp that tells the provider the file is new.
-// The file write is the one that matters — once it succeeds the upload is reported as successful
-// even if the timestamp write fails, because the alternative is telling the admin the upload
-// failed when their data is in fact stored.
 func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Request) {
 	// Cap the body before reading it, so an oversized upload cannot exhaust memory
 	r.Body = http.MaxBytesReader(w, r.Body, maxFileSizeBytes)
@@ -92,10 +87,12 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Store the raw bytes rather than the decoded value, so a download returns exactly
-	// what was uploaded. Note KV.Set reports failure two ways: an error, or set == false
-	// meaning the write did not happen.
-	set, err := p.client.KV.Set(sync.UserAttrsStoreKey, raw)
+	// Store the raw bytes rather than the decoded value, so a download returns exactly what was
+	// uploaded. The timestamp is stored together with the file to ensure they are in sync.
+	// Note KV.Set reports failure two ways: an error, or set == false meaning the write did not
+	// happen.
+	uploadedAt := time.Now()
+	set, err := p.client.KV.Set(sync.UserAttrsStoreKey, sync.StoredUserAttrs{LastUpdated: uploadedAt, Data: raw})
 	if err != nil {
 		p.client.Log.Error("failed to upload userAttrs file", "err", err)
 		p.errorWithJSON(w, http.StatusInternalServerError, "failed to upload file")
@@ -105,44 +102,29 @@ func (p *Plugin) handleUploadUserAttributes(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Update last updated time. This is what KVStoreProvider compares against to decide the
-	// stored file is new; without it the file sits in the KV store and is never synced.
-	// No returning early with an error after the file was uploaded, so the timestamp update is best
-	// effort.
-	uploadedAt := time.Now()
-	var lastUpdated *time.Time
-	timeData, err := uploadedAt.MarshalJSON()
-	if err != nil {
-		p.client.Log.Error("failed to update timestamp to process file", "err", err)
-	} else if set, err := p.client.KV.Set(sync.UserAttrsLastUpdatedKey, timeData); !set || err != nil {
-		p.client.Log.Error("failed to update timestamp to process file", "err", err)
-	} else {
-		lastUpdated = &uploadedAt
-	}
-
 	// Acknowledge with the resulting state, in the same shape the status endpoint uses, so the
 	// webapp can show the new timestamp without asking for it again.
-	p.responseWithJSON(w, http.StatusCreated, userAttributesStatus{Exists: true, LastUpdated: lastUpdated})
+	p.responseWithJSON(w, http.StatusCreated, userAttributesStatus{Exists: true, LastUpdated: &uploadedAt})
 }
 
 // handleDownloadUserAttributes returns the stored attributes file verbatim, so an admin can see
 // exactly what the plugin is syncing. This is the one handler that does not respond with the JSON
 // envelope, because the body is the file itself.
 func (p *Plugin) handleDownloadUserAttributes(w http.ResponseWriter, r *http.Request) {
-	var userAttrs []byte
-	if err := p.client.KV.Get(sync.UserAttrsStoreKey, &userAttrs); err != nil {
+	stored, err := sync.ReadStoredUserAttrs(p.client)
+	if err != nil {
 		p.client.Log.Error("failed to retrieve userAttrs", "err", err)
 		p.errorWithJSON(w, http.StatusInternalServerError, "failed to download file")
 		return
 	}
 
-	if len(userAttrs) == 0 {
+	if len(stored.Data) == 0 {
 		p.errorWithJSON(w, http.StatusNotFound, "file not found")
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write(userAttrs); err != nil {
+	if _, err := w.Write(stored.Data); err != nil {
 		p.API.LogError("Failed to write file in response", "err", err.Error())
 		p.errorWithJSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -164,57 +146,31 @@ func (p *Plugin) handleUserAttributesStatus(w http.ResponseWriter, r *http.Reque
 	p.responseWithJSON(w, http.StatusOK, status)
 }
 
-// handleDeleteUserAttributes removes the stored file and its timestamp.
+// handleDeleteUserAttributes removes the stored file.
 //
 // Attribute values already written to user profiles are not affected — deleting the source does not
 // retract what has already been synced. Note this leaves KVStoreProvider with nothing to read,
-// which it reports as an error on every subsequent sync until a replacement is uploaded; both keys
-// are removed together so that error names the right cause.
+// which it reports as an error on every subsequent sync until a replacement is uploaded.
 func (p *Plugin) handleDeleteUserAttributes(w http.ResponseWriter, r *http.Request) {
 	if err := p.client.KV.Delete(sync.UserAttrsStoreKey); err != nil {
 		p.errorWithJSON(w, http.StatusForbidden, "failed to delete file")
 		return
 	}
 
-	if err := p.client.KV.Delete(sync.UserAttrsLastUpdatedKey); err != nil {
-		// no early error return, timestamp deletion is best effort so we can still report the file was deleted.
-		// just log an error instead.
-		p.client.Log.Error("failed to delete file timestamp after file deletion", "err", err)
-	}
-
 	w.WriteHeader(http.StatusOK)
 }
 
-// readUserAttributesStatus reads both KV keys and reports what is stored.
-//
-// A timestamp that will not parse is reported as no timestamp rather than as an error: the file is
-// still stored and still downloadable, and the sync failure a malformed timestamp causes is already
-// reported by KVStoreProvider, which is the one that has to act on it.
+// readUserAttributesStatus reports what is stored.
 func (p *Plugin) readUserAttributesStatus() (userAttributesStatus, error) {
-	var userAttrs []byte
-	if err := p.client.KV.Get(sync.UserAttrsStoreKey, &userAttrs); err != nil {
-		return userAttributesStatus{}, fmt.Errorf("failed to retrieve userAttrs: %w", err)
+	stored, err := sync.ReadStoredUserAttrs(p.client)
+	if err != nil {
+		return userAttributesStatus{}, err
 	}
 
-	status := userAttributesStatus{Exists: len(userAttrs) > 0}
-
-	var rawTime []byte
-	if err := p.client.KV.Get(sync.UserAttrsLastUpdatedKey, &rawTime); err != nil {
-		return userAttributesStatus{}, fmt.Errorf("failed to retrieve userAttrs timestamp: %w", err)
+	status := userAttributesStatus{Exists: len(stored.Data) > 0}
+	if !stored.LastUpdated.IsZero() {
+		status.LastUpdated = &stored.LastUpdated
 	}
-
-	// An unset key is the ordinary state before the first upload and after a delete, so it is not
-	// worth logging. Checked explicitly because time.Time.UnmarshalJSON rejects empty input.
-	if len(rawTime) == 0 {
-		return status, nil
-	}
-
-	var lastUpdated time.Time
-	if err := lastUpdated.UnmarshalJSON(rawTime); err != nil {
-		p.client.Log.Warn("stored userAttrs timestamp is malformed", "value", string(rawTime), "err", err)
-		return status, nil
-	}
-	status.LastUpdated = &lastUpdated
 
 	return status, nil
 }

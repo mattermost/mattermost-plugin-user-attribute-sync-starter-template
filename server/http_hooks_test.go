@@ -78,6 +78,30 @@ func doRequest(t *testing.T, p *Plugin, method, path, userID string, body []byte
 	return w.Result()
 }
 
+// storedValue encodes a StoredUserAttrs the way the upload handler does, so a KVGet mock returns
+// what a handler would really find.
+func storedValue(t *testing.T, lastUpdated time.Time, data []byte) []byte {
+	t.Helper()
+
+	value, err := json.Marshal(sync.StoredUserAttrs{LastUpdated: lastUpdated, Data: data})
+	require.NoError(t, err)
+
+	return value
+}
+
+// storesFile matches the value the upload handler writes while having a looser check on the
+// LastUpdated field, since that is set by time.Now()
+func storesFile(data []byte) interface{} {
+	return mock.MatchedBy(func(value []byte) bool {
+		var stored sync.StoredUserAttrs
+		if err := json.Unmarshal(value, &stored); err != nil {
+			return false
+		}
+
+		return bytes.Equal(stored.Data, data) && !stored.LastUpdated.IsZero()
+	})
+}
+
 // requireErrorResponse asserts the handler failed with the given status and
 // message, which errorWithJSON renders as {"error": "..."}.
 func requireErrorResponse(t *testing.T, resp *http.Response, statusCode int, message string) {
@@ -138,9 +162,7 @@ func TestHandleUploadUserAttributes(t *testing.T) {
 
 		userID := model.NewId()
 		asSysadmin(api, userID)
-		api.On("KVSetWithOptions", sync.UserAttrsStoreKey, validFile, model.PluginKVSetOptions{}).
-			Return(true, nil).Once()
-		api.On("KVSetWithOptions", sync.UserAttrsLastUpdatedKey, mock.Anything, model.PluginKVSetOptions{}).
+		api.On("KVSetWithOptions", sync.UserAttrsStoreKey, storesFile(validFile), model.PluginKVSetOptions{}).
 			Return(true, nil).Once()
 
 		resp := doRequest(t, p, http.MethodPost, "/user_attributes", userID, validFile)
@@ -151,27 +173,6 @@ func TestHandleUploadUserAttributes(t *testing.T) {
 		require.True(t, body.Exists)
 		// Not checking exact time since it is determined by the handler.
 		require.NotNil(t, body.LastUpdated)
-	})
-
-	// The file is what matters, so a failed timestamp write is still a successful upload. It is
-	// reported as a file with no timestamp so the end user can be made aware.
-	t.Run("reports no timestamp when the timestamp write fails", func(t *testing.T) {
-		p, api := newTestPlugin(t)
-
-		userID := model.NewId()
-		asSysadmin(api, userID)
-		api.On("KVSetWithOptions", sync.UserAttrsStoreKey, validFile, model.PluginKVSetOptions{}).
-			Return(true, nil).Once()
-		api.On("KVSetWithOptions", sync.UserAttrsLastUpdatedKey, mock.Anything, model.PluginKVSetOptions{}).
-			Return(false, nil).Once()
-
-		resp := doRequest(t, p, http.MethodPost, "/user_attributes", userID, validFile)
-		require.Equal(t, http.StatusCreated, resp.StatusCode)
-
-		var body userAttributesStatus
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-		require.True(t, body.Exists)
-		require.Nil(t, body.LastUpdated)
 	})
 
 	t.Run("rejects malformed json", func(t *testing.T) {
@@ -224,7 +225,7 @@ func TestHandleUploadUserAttributes(t *testing.T) {
 
 		userID := model.NewId()
 		asSysadmin(api, userID)
-		api.On("KVSetWithOptions", sync.UserAttrsStoreKey, validFile, model.PluginKVSetOptions{}).
+		api.On("KVSetWithOptions", sync.UserAttrsStoreKey, storesFile(validFile), model.PluginKVSetOptions{}).
 			Return(false, model.NewAppError("KVSetWithOptions", "kv.set.app_error", nil, "connection refused", http.StatusInternalServerError)).Once()
 
 		resp := doRequest(t, p, http.MethodPost, "/user_attributes", userID, validFile)
@@ -236,7 +237,7 @@ func TestHandleUploadUserAttributes(t *testing.T) {
 
 		userID := model.NewId()
 		asSysadmin(api, userID)
-		api.On("KVSetWithOptions", sync.UserAttrsStoreKey, validFile, model.PluginKVSetOptions{}).
+		api.On("KVSetWithOptions", sync.UserAttrsStoreKey, storesFile(validFile), model.PluginKVSetOptions{}).
 			Return(false, nil).Once()
 
 		resp := doRequest(t, p, http.MethodPost, "/user_attributes", userID, validFile)
@@ -251,16 +252,16 @@ func TestHandleDownloadUserAttributes(t *testing.T) {
 		p, api := newTestPlugin(t)
 
 		userID := model.NewId()
-		stored := []byte(`[{"email":"user1@example.com","job_title":"Engineer"}]`)
+		file := []byte(`[{"email":"user1@example.com","job_title":"Engineer"}]`)
 		asSysadmin(api, userID)
-		api.On("KVGet", sync.UserAttrsStoreKey).Return(stored, nil).Once()
+		api.On("KVGet", sync.UserAttrsStoreKey).Return(storedValue(t, time.Now(), file), nil).Once()
 
 		resp := doRequest(t, p, http.MethodGet, "/user_attributes", userID, nil)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 
 		body, err := readAll(resp)
 		require.NoError(t, err)
-		require.Equal(t, stored, body)
+		require.Equal(t, file, body)
 	})
 
 	t.Run("reports no stored file", func(t *testing.T) {
@@ -291,16 +292,14 @@ func TestHandleDownloadUserAttributes(t *testing.T) {
 func TestHandleUserAttributesStatus(t *testing.T) {
 	uploadedAt, err := time.Parse(time.RFC3339, "2026-08-20T15:04:05Z")
 	require.NoError(t, err)
-	storedTime, err := uploadedAt.MarshalJSON()
-	require.NoError(t, err)
 
 	t.Run("reports a stored file with upload time", func(t *testing.T) {
 		p, api := newTestPlugin(t)
 
 		userID := model.NewId()
 		asSysadmin(api, userID)
-		api.On("KVGet", sync.UserAttrsStoreKey).Return([]byte(`[{"email":"user1@example.com"}]`), nil).Once()
-		api.On("KVGet", sync.UserAttrsLastUpdatedKey).Return(storedTime, nil).Once()
+		api.On("KVGet", sync.UserAttrsStoreKey).
+			Return(storedValue(t, uploadedAt, []byte(`[{"email":"user1@example.com"}]`)), nil).Once()
 
 		resp := doRequest(t, p, http.MethodGet, "/user_attributes/status", userID, nil)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -318,7 +317,6 @@ func TestHandleUserAttributesStatus(t *testing.T) {
 		userID := model.NewId()
 		asSysadmin(api, userID)
 		api.On("KVGet", sync.UserAttrsStoreKey).Return(nil, nil).Once()
-		api.On("KVGet", sync.UserAttrsLastUpdatedKey).Return(nil, nil).Once()
 
 		resp := doRequest(t, p, http.MethodGet, "/user_attributes/status", userID, nil)
 		require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -326,25 +324,6 @@ func TestHandleUserAttributesStatus(t *testing.T) {
 		var body userAttributesStatus
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 		require.False(t, body.Exists)
-		require.Nil(t, body.LastUpdated)
-	})
-
-	// A timestamp that will not parse is not worth failing the request over: the file is still
-	// there and still downloadable, so the nil lastUpdate is sufficoent red flag.
-	t.Run("reports a stored file whose timestamp is malformed", func(t *testing.T) {
-		p, api := newTestPlugin(t)
-
-		userID := model.NewId()
-		asSysadmin(api, userID)
-		api.On("KVGet", sync.UserAttrsStoreKey).Return([]byte(`[{"email":"user1@example.com"}]`), nil).Once()
-		api.On("KVGet", sync.UserAttrsLastUpdatedKey).Return([]byte("not a timestamp"), nil).Once()
-
-		resp := doRequest(t, p, http.MethodGet, "/user_attributes/status", userID, nil)
-		require.Equal(t, http.StatusOK, resp.StatusCode)
-
-		var body userAttributesStatus
-		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
-		require.True(t, body.Exists)
 		require.Nil(t, body.LastUpdated)
 	})
 
@@ -360,22 +339,22 @@ func TestHandleUserAttributesStatus(t *testing.T) {
 		requireErrorResponse(t, resp, http.StatusInternalServerError, "failed to access storage")
 	})
 
-	t.Run("reports a failed timestamp read", func(t *testing.T) {
+	// A value that will not decode says nothing about whether a file is there, so it fails rather
+	// than reporting nothing stored.
+	t.Run("reports a malformed stored value", func(t *testing.T) {
 		p, api := newTestPlugin(t)
 
 		userID := model.NewId()
 		asSysadmin(api, userID)
-		api.On("KVGet", sync.UserAttrsStoreKey).Return([]byte(`[{"email":"user1@example.com"}]`), nil).Once()
-		api.On("KVGet", sync.UserAttrsLastUpdatedKey).
-			Return(nil, model.NewAppError("KVGet", "kv.get.app_error", nil, "connection refused", http.StatusInternalServerError)).Once()
+		api.On("KVGet", sync.UserAttrsStoreKey).Return([]byte("not json"), nil).Once()
 
 		resp := doRequest(t, p, http.MethodGet, "/user_attributes/status", userID, nil)
 		requireErrorResponse(t, resp, http.StatusInternalServerError, "failed to access storage")
 	})
 }
 
-// TestHandleDeleteUserAttributes checks that deleting removes both KV keys, so the provider is
-// left with neither data nor a timestamp pointing at data that is gone.
+// TestHandleDeleteUserAttributes checks that deleting removes the stored file, leaving the
+// provider with nothing to read.
 func TestHandleDeleteUserAttributes(t *testing.T) {
 	t.Run("deletes the stored file", func(t *testing.T) {
 		p, api := newTestPlugin(t)
@@ -384,8 +363,6 @@ func TestHandleDeleteUserAttributes(t *testing.T) {
 		asSysadmin(api, userID)
 		// KV.Delete is a Set of a nil value under the hood.
 		api.On("KVSetWithOptions", sync.UserAttrsStoreKey, []byte(nil), model.PluginKVSetOptions{}).
-			Return(true, nil).Once()
-		api.On("KVSetWithOptions", sync.UserAttrsLastUpdatedKey, []byte(nil), model.PluginKVSetOptions{}).
 			Return(true, nil).Once()
 
 		resp := doRequest(t, p, http.MethodDelete, "/user_attributes", userID, nil)
