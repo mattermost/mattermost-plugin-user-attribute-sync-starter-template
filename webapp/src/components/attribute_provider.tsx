@@ -35,8 +35,10 @@ type Props = {
  *
  * Radios rather than a dropdown, and inline styles matching the console's own RadioSetting
  * classes, so the setting looks like the ones around it.
+ *
+ * Default value is 'FileProvider', matching the manifest and plugin.json.
  */
-export default function AttributeProvider({id, value, onChange, disabled, setByEnv}: Props) {
+export default function AttributeProvider({id, value = 'FileProvider', onChange, disabled, setByEnv}: Props) {
     // Matches the console's own RadioSetting: an env-pinned value is as good as disabled, because
     // saving a different choice here would not change what the server actually uses.
     const isDisabled = disabled || setByEnv;
