@@ -1,0 +1,33 @@
+.AttrProvider__container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+// RadioSetting__* are the System Console's own class names, reused so these radios look like the
+// built-in ones. Only the default top margin is overridden, since the container handles spacing.
+.RadioSetting__label,
+.RadioSetting__text {
+    margin-top: 0;
+}
+
+// The per-source panel. Boxed to make clear that its contents belong to the selected radio above
+// rather than to the setting as a whole. Colors come from the theme's CSS variables, so this
+// follows whatever theme the admin is using instead of hard-coding light-mode values.
+.AttrProvider__details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    border: 1px solid rgba(var(--center-channel-color-rgb), 0.08);
+    border-radius: 4px;
+
+    > h5 {
+        margin: 0;
+        font-weight: 600;
+    }
+
+    > p {
+        margin: 0;
+    }
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"sync"
 
+	"github.com/gorilla/mux"
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/pluginapi"
@@ -18,11 +19,21 @@ type Plugin struct {
 	// client is the Mattermost server API client.
 	client *pluginapi.Client
 
+	// router is the HTTP router that serves API endpoints.
+	router *mux.Router
+
 	// backgroundJob runs attribute sync on the configured time interval.
 	backgroundJob *cluster.Job
 
-	// fileProvider provides an example of syncing user attribute data from external source.
-	fileProvider attrsync.AttributeProvider
+	// attributeProvider provides an example of syncing user attribute data from external source.
+	// there are two examples provided in this repo: FileProvider and KVStoreProvider.
+	// Which one is in use is decided by the AttributeProvider configuration.
+	//
+	// The sync job owns these two fields while it is scheduled, which is why neither is locked.
+	attributeProvider attrsync.AttributeProvider
+
+	// attributeProviderKind is the setting attributeProvider was built from.
+	attributeProviderKind string
 
 	// groupID is the ID of the Mattermost property group this plugin reads and writes.
 	// We use the "access_control" group because user attribute fields defined here can be
@@ -45,6 +56,10 @@ type Plugin struct {
 func (p *Plugin) OnActivate() error {
 	p.client = pluginapi.NewClient(p.API, p.Driver)
 
+	// Register the HTTP routes that back the System Console upload UI. Do this before anything
+	// that can fail, so the endpoints exist for any request the server routes to us.
+	p.initializeAPI()
+
 	// "access_control" is the property group whose fields can be referenced
 	// from attribute-based access control (ABAC) policy rules. We register
 	// our user attributes here so policies can evaluate against them (e.g.
@@ -66,8 +81,8 @@ func (p *Plugin) OnActivate() error {
 	}
 	p.client.Log.Info("Field sync completed successfully")
 
-	// Initialize the file provider
-	p.fileProvider = attrsync.NewFileProvider()
+	// Note: the attribute provider is built by the sync job on its first run, not here — see
+	// ensureAttributeProvider.
 
 	// Set up the attribute sync cluster job
 	// This job runs periodically to synchronize user attribute values from external
@@ -89,15 +104,21 @@ func (p *Plugin) OnActivate() error {
 }
 
 // OnDeactivate is invoked when the plugin is deactivated.
-// Cleans up the attribute sync cluster job and file provider to prevent orphaned resources.
+// Cleans up the attribute sync cluster job and the attribute provider to prevent orphaned
+// resources. The HTTP router needs no cleanup; the server stops routing to a deactivated plugin.
+//
+// The order is important: cluster.Job.Close blocks until a running sync returns, which is what
+// makes it safe to close the provider here.
+// The example Attribute Providers in this repo have no-ops for Close() but this pattern will
+// be safe for other providers that require it.
 func (p *Plugin) OnDeactivate() error {
 	if p.backgroundJob != nil {
 		if err := p.backgroundJob.Close(); err != nil {
 			p.API.LogError("Failed to close attribute sync job", "err", err)
 		}
 	}
-	if p.fileProvider != nil {
-		if err := p.fileProvider.Close(); err != nil {
+	if p.attributeProvider != nil {
+		if err := p.attributeProvider.Close(); err != nil {
 			p.API.LogError("Failed to close file provider", "err", err)
 		}
 	}

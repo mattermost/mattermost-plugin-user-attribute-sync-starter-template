@@ -1,0 +1,9 @@
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+.eslintcache
+
+# Written by global-setup.ts, removed by global-teardown.ts. Contains a live
+# session cookie for the admin user, so it must never be committed.
+adminStorageState.json

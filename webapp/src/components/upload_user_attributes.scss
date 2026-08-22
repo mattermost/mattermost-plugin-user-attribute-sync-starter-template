@@ -1,0 +1,40 @@
+.UserAttrSync {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+
+    &__section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    // Small uppercase section labels, matching how the System Console titles subsections.
+    &__heading {
+        margin: 0;
+        color: rgba(var(--center-channel-color-rgb), 0.75);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        line-height: 16px;
+        text-transform: uppercase;
+    }
+
+    &__row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    &__status {
+        margin: 0;
+        color: rgba(var(--center-channel-color-rgb), 0.75);
+        font-size: 14px;
+    }
+}
+
+// Counterpart to the webapp's existing .error-text, which the console already styles. There is no
+// equivalent success class to inherit, so define one using the theme's semantic success color.
+.success-text {
+    color: rgb(var(--semantic-color-success));
+}

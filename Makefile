@@ -169,12 +169,14 @@ install-go-tools:
 
 ## Runs eslint and golangci-lint
 .PHONY: check-style
-check-style: manifest-check apply webapp/node_modules install-go-tools
+check-style: manifest-check apply webapp/node_modules e2e/node_modules install-go-tools
 	@echo Checking for style guide compliance
 
 ifneq ($(HAS_WEBAPP),)
 	cd webapp && npm run lint
 	cd webapp && npm run check-types
+	cd e2e && npm run lint
+	cd e2e && npm run check-types
 endif
 
 # It's highly recommended to run go-vet first
@@ -212,6 +214,11 @@ ifneq ($(HAS_WEBAPP),)
 	cd webapp && $(NPM) install
 	touch $@
 endif
+
+## Ensures the e2e test dependencies are installed.
+e2e/node_modules: $(wildcard e2e/package.json)
+	cd e2e && $(NPM) install
+	touch $@
 
 ## Builds the webapp, if it exists.
 .PHONY: webapp
@@ -340,6 +347,12 @@ endif
 ifneq ($(HAS_WEBAPP),)
 	cd webapp && $(NPM) run test;
 endif
+
+## Runs the Playwright end-to-end tests. Requires a running Mattermost server
+## with this plugin deployed — see e2e/README.md.
+.PHONY: test-e2e
+test-e2e: e2e/node_modules
+	cd e2e && $(NPM) test
 
 ## Creates a coverage report for the server code.
 .PHONY: coverage

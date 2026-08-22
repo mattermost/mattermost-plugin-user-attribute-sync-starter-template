@@ -39,6 +39,47 @@ func (p *Plugin) nextWaitInterval(now time.Time, metadata cluster.JobMetadata) t
 	return nextRunTime.Sub(now)
 }
 
+// ensureAttributeProvider returns the provider based on plugin configuration, building it on
+// first use and replacing it when the setting has changed since.
+//
+// This is only called in runSync to avoid concurrency issues of closing a provider while it is
+// still being read.
+func (p *Plugin) ensureAttributeProvider() sync.AttributeProvider {
+	kind := p.getConfiguration().AttributeProvider
+
+	if p.attributeProvider != nil && p.attributeProviderKind == kind {
+		return p.attributeProvider
+	}
+
+	if p.attributeProvider != nil {
+		// Replace it even if closing failed; syncing from the wrong source is worse than leaking.
+		if err := p.attributeProvider.Close(); err != nil {
+			p.client.Log.Error("Failed to close the replaced attribute provider", "err", err)
+		}
+	}
+
+	p.attributeProvider = p.newAttributeProvider(kind)
+	p.attributeProviderKind = kind
+
+	return p.attributeProvider
+}
+
+// newAttributeProvider constructs the data source named by kind.
+//
+// It panics on an unrecognized value: the setting is constrained to the ConfigAttributeProvider*
+// values by the System Console, so anything else means the switch and the constants have drifted
+// apart, and syncing nothing silently would be worse than failing loudly.
+func (p *Plugin) newAttributeProvider(kind string) sync.AttributeProvider {
+	switch kind {
+	case ConfigAttributeProviderFile:
+		return sync.NewFileProvider()
+	case ConfigAttributeProviderKVStore:
+		return sync.NewKVStoreProvider(p.client)
+	default:
+		panic("unrecognized Attribute Provider")
+	}
+}
+
 // runSync executes the user attribute value synchronization workflow.
 //
 // This function runs periodically (at the interval configured in plugin settings) to synchronize
@@ -49,8 +90,10 @@ func (p *Plugin) nextWaitInterval(now time.Time, metadata cluster.JobMetadata) t
 func (p *Plugin) runSync() {
 	p.client.Log.Info("Sync starting")
 
+	provider := p.ensureAttributeProvider()
+
 	// Fetch changed users since last sync
-	users, err := p.fileProvider.GetUserAttributes()
+	users, err := provider.GetUserAttributes()
 	if err != nil {
 		p.client.Log.Error("Failed to fetch changed users", "error", err.Error())
 		return
