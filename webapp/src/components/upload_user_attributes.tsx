@@ -139,7 +139,7 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
 
         try {
             const response = await fetch(
-                `/plugins/${manifest.id}/user_attributes`,
+                Client4.getAbsoluteUrl(`/plugins/${manifest.id}/user_attributes`),
                 Client4.getOptions({method: 'POST', body: pendingFile.file}), //getOptions() provides CSRF Token for POST
             );
 
@@ -167,7 +167,7 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
         setError(null);
 
         try {
-            const response = await fetch(`/plugins/${manifest.id}/user_attributes`);
+            const response = await fetch(Client4.getAbsoluteUrl(`/plugins/${manifest.id}/user_attributes`));
 
             if (!response.ok) {
                 throw new Error(`Download failed (${response.status})`);
@@ -200,7 +200,7 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
 
         try {
             const response = await fetch(
-                `/plugins/${manifest.id}/user_attributes`,
+                Client4.getAbsoluteUrl(`/plugins/${manifest.id}/user_attributes`),
                 Client4.getOptions({method: 'DELETE'}),
             );
 
@@ -221,7 +221,7 @@ export default function UploadUserAttributes({id, disabled = false}: Props) {
         // this is only called on mount, with status state initialized to 'init' above.
         // if that changes this should get its own status similar to the other calls.
         try {
-            const response = await fetch(`/plugins/${manifest.id}/user_attributes/status`);
+            const response = await fetch(Client4.getAbsoluteUrl(`/plugins/${manifest.id}/user_attributes/status`));
             const body = await response.json().catch(() => ({}));
             if (!response.ok) {
                 throw new Error(body.error ?? `File status check failed (${response.status})`);
