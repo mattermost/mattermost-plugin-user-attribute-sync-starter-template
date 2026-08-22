@@ -20,10 +20,10 @@ It also contains  **two example, interchangeable data sources**, so you can see 
 Plugin Activation (Once)
   ├─> Register HTTP Routes
   ├─> Create/Update User Attribute Fields
-  ├─> Construct The Configured Data Source
   └─> Start Background Job
 
 Background Job (On timed interval)
+  ├─> Build Or Replace The Data Source If The Setting Changed
   ├─> Fetch Changed Values From The Configured Data Source
   │     ├── File Provider     ──> reads <mattermost>/data/user_attributes.json
   │     └── KV Store Provider ──> reads the plugin key-value store
@@ -99,13 +99,13 @@ The synced user attribute values can be viewed in System Console → User Attrib
 
 ## Choosing a Data Source
 
-The **User Attribute Source** setting in System Console → Plugins → User Attribute Sync Starter Template selects which of the two example sources the plugin reads from. Changing it takes effect on Save, without restarting the plugin.
+The **User Attribute Source** setting in System Console → Plugins → User Attribute Sync Starter Template selects which of the two example sources the plugin reads from. Changing it needs no plugin restart: the setting is saved immediately, and the job picks up the new source on its next run.
 
 | | Local Filesystem | Direct Upload |
 |---|---|---|
 | Reads from | `<mattermost>/data/user_attributes.json` | Mattermost's key-value store |
 | Data is placed by | You, on the server's filesystem | An admin, through the System Console |
-| Survives a container restart | No | Yes — the KV store is in the database |
+| Survives redeploying the container | Only if `<mattermost>/data` is a persistent volume | Yes — the KV store is in the database |
 | Works on Mattermost Cloud | No — no filesystem access | Yes |
 | Detects changes by | File modification time | A timestamp written on upload |
 | Good for | Local development; servers you have shell access to | Cloud and containerized deployments; letting an admin manage the data without server access |
@@ -251,7 +251,7 @@ This applies to the *Local Filesystem* source only. Edit `server/sync/file_provi
 const defaultDataFilePath = "data/my_custom_file.json"
 ```
 
-The path is resolved against the Mattermost server process's working directory. The *Direct Upload* source has no path to change — its data lives in the key-value store under the keys declared in `server/sync/kv_store_provider.go`.
+The path is resolved against the Mattermost server process's working directory. The *Direct Upload* source has no path to change — its data lives in the key-value store under single fixed key.
 
 ### Implementing Custom Data Sources
 
